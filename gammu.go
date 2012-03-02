@@ -1,3 +1,4 @@
+// Go binding for libGammu (library to work with different cell phones)
 package gammu
 
 /*
