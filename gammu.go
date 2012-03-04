@@ -25,6 +25,8 @@ void setDebug() {
 */
 import "C"
 import (
+	"io"
+	"runtime"
 	"time"
 	"unsafe"
 )
@@ -38,9 +40,10 @@ func (e Error) Error() string {
 
 // StateMachine
 type StateMachine struct {
-	g      *C.GSM_StateMachine
-	smsc   C.GSM_SMSC
-	status C.GSM_Error
+	g         *C.GSM_StateMachine
+	smsc      C.GSM_SMSC
+	status    C.GSM_Error
+	connected bool
 
 	Timeout time.Duration // Default 10s
 }
@@ -49,8 +52,6 @@ type StateMachine struct {
 // configuration file if cf == "".
 func NewStateMachine(cf string) (*StateMachine, error) {
 	//C.setDebug()
-	var sm StateMachine
-
 	var config *C.INI_Section
 	if cf != "" {
 		cs := C.CString(cf)
@@ -65,22 +66,24 @@ func NewStateMachine(cf string) (*StateMachine, error) {
 	}
 	defer C.INI_Free(config)
 
+	sm := new(StateMachine)
 	sm.g = C.GSM_AllocStateMachine()
 	if sm.g == nil {
 		panic("out of memory")
 	}
 
 	if e := C.GSM_ReadConfig(config, C.GSM_GetConfig(sm.g, 0), 0); e != C.ERR_NONE {
-		sm.Free()
+		sm.free()
 		return nil, Error(e)
 	}
 	C.GSM_SetConfigNum(sm.g, 1)
 	sm.Timeout = 10 * time.Second
 
-	return &sm, nil
+	runtime.SetFinalizer(sm, (*StateMachine).free)
+	return sm, nil
 }
 
-func (sm *StateMachine) Free() {
+func (sm *StateMachine) free() {
 	C.GSM_FreeStateMachine(sm.g)
 	sm.g = nil
 }
@@ -89,6 +92,7 @@ func (sm *StateMachine) Connect() error {
 	if e := C.GSM_InitConnection(sm.g, 1); e != C.ERR_NONE {
 		return Error(e)
 	}
+	sm.connected = true
 	C.setStatusCallback(sm.g, &sm.status)
 	sm.smsc.Location = 1
 	if e := C.GSM_GetSMSC(sm.g, &sm.smsc); e != C.ERR_NONE {
@@ -101,6 +105,7 @@ func (sm *StateMachine) Disconnect() error {
 	if e := C.GSM_TerminateConnection(sm.g); e != C.ERR_NONE {
 		return Error(e)
 	}
+	sm.connected = false
 	return nil
 }
 
@@ -180,4 +185,49 @@ func (sm *StateMachine) SendLongSMS(number, text string) error {
 		}
 	}
 	return nil
+}
+
+func encodeUTF8(in *C.uchar) string {
+	out := make([]C.char, C.UnicodeLength(in)*2)
+	C.EncodeUTF8(&out[0], in)
+	return C.GoString(&out[0])
+}
+
+type SMS struct {
+	Number, Text string
+}
+
+// Returns io.EOF if there is no any SMS to read
+func (sm *StateMachine) GetNextSMS(first, del bool) (sms SMS, err error) {
+	var start C.gboolean
+	if first {
+		start = C.TRUE
+	}
+	var msms C.GSM_MultiSMSMessage
+	msms.Number = 0
+	msms.SMS[0].Location = 0
+	msms.SMS[0].Folder = 0
+	if e := C.GSM_GetNextSMS(sm.g, &msms, start); e != C.ERR_NONE {
+		if e == C.ERR_EMPTY {
+			err = io.EOF
+		} else {
+			err = Error(e)
+		}
+		return
+	}
+	for i := 0; i < int(msms.Number); i++ {
+		s := msms.SMS[i]
+		sms.Number = encodeUTF8(&s.Number[0])
+		if s.Coding == C.SMS_Coding_8bit {
+			continue
+		}
+		sms.Text += encodeUTF8(&s.Text[0])
+		if del {
+			if e := C.GSM_DeleteSMS(sm.g, &s); e != C.ERR_NONE {
+				err = Error(e)
+				return
+			}
+		}
+	}
+	return
 }
