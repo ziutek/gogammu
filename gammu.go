@@ -84,6 +84,9 @@ func NewStateMachine(cf string) (*StateMachine, error) {
 }
 
 func (sm *StateMachine) free() {
+	if sm.connected {
+		sm.Disconnect()
+	}
 	C.GSM_FreeStateMachine(sm.g)
 	sm.g = nil
 }
