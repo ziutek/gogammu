@@ -45,7 +45,7 @@ type StateMachine struct {
 	status    C.GSM_Error
 	connected bool
 
-	Timeout time.Duration // Default 10s
+	Timeout time.Duration // Default 15s
 }
 
 // Creates new state maschine using cf configuration file or default
@@ -77,7 +77,7 @@ func NewStateMachine(cf string) (*StateMachine, error) {
 		return nil, Error(e)
 	}
 	C.GSM_SetConfigNum(sm.g, 1)
-	sm.Timeout = 10 * time.Second
+	sm.Timeout = 15 * time.Second
 
 	runtime.SetFinalizer(sm, (*StateMachine).free)
 	return sm, nil
@@ -118,8 +118,14 @@ func decodeUTF8(out *C.uchar, in string) {
 	C.free(unsafe.Pointer(cn))
 }
 
-func (sm *StateMachine) sendSMS(sms *C.GSM_SMSMessage) error {
+func (sm *StateMachine) sendSMS(sms *C.GSM_SMSMessage, number string, report bool) error {
 	C.CopyUnicodeString(&sms.SMSC.Number[0], &sm.smsc.Number[0])
+	decodeUTF8(&sms.Number[0], number)
+	if report {
+		sms.PDU = C.SMS_Status_Report
+	} else {
+		sms.PDU = C.SMS_Submit
+	}
 	// Send mepssage
 	sm.status = C.ERR_TIMEOUT
 	if e := C.GSM_SendSMS(sm.g, sms); e != C.ERR_NONE {
@@ -143,18 +149,16 @@ func (sm *StateMachine) sendSMS(sms *C.GSM_SMSMessage) error {
 	return nil
 }
 
-func (sm *StateMachine) SendSMS(number, text string) error {
+func (sm *StateMachine) SendSMS(number, text string, report bool) error {
 	var sms C.GSM_SMSMessage
-	decodeUTF8(&sms.Number[0], number)
 	decodeUTF8(&sms.Text[0], text)
-	sms.PDU = C.SMS_Submit
 	sms.UDH.Type = C.UDH_NoUDH
 	sms.Coding = C.SMS_Coding_Default_No_Compression
 	sms.Class = 1
-	return sm.sendSMS(&sms)
+	return sm.sendSMS(&sms, number, report)
 }
 
-func (sm *StateMachine) SendLongSMS(number, text string) error {
+func (sm *StateMachine) SendLongSMS(number, text string, report bool) error {
 	// Fill in SMS info
 	var smsInfo C.GSM_MultiPartSMSInfo
 	C.GSM_ClearMultiPartSMSInfo(&smsInfo)
@@ -178,12 +182,8 @@ func (sm *StateMachine) SendLongSMS(number, text string) error {
 		return Error(e)
 	}
 	// Send message
-
 	for i := 0; i < int(msms.Number); i++ {
-		sms := msms.SMS[i]
-		decodeUTF8(&sms.Number[0], number)
-		sms.PDU = C.SMS_Submit
-		if e := sm.sendSMS(&sms); e != nil {
+		if e := sm.sendSMS(&msms.SMS[i], number, report); e != nil {
 			return e
 		}
 	}
@@ -198,19 +198,14 @@ func encodeUTF8(in *C.uchar) string {
 
 type SMS struct {
 	Number, Text string
+	Report       bool // True if this message is a delivery report
 }
 
-// Returns io.EOF if there is no any SMS to read
-func (sm *StateMachine) GetNextSMS(first, del bool) (sms SMS, err error) {
-	var start C.gboolean
-	if first {
-		start = C.TRUE
-	}
+// Reads and deletes first avaliable message.
+// Returns io.EOF if there is no more messages to read
+func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 	var msms C.GSM_MultiSMSMessage
-	msms.Number = 0
-	msms.SMS[0].Location = 0
-	msms.SMS[0].Folder = 0
-	if e := C.GSM_GetNextSMS(sm.g, &msms, start); e != C.ERR_NONE {
+	if e := C.GSM_GetNextSMS(sm.g, &msms, C.TRUE); e != C.ERR_NONE {
 		if e == C.ERR_EMPTY {
 			err = io.EOF
 		} else {
@@ -225,11 +220,12 @@ func (sm *StateMachine) GetNextSMS(first, del bool) (sms SMS, err error) {
 			continue
 		}
 		sms.Text += encodeUTF8(&s.Text[0])
-		if del {
-			if e := C.GSM_DeleteSMS(sm.g, &s); e != C.ERR_NONE {
-				err = Error(e)
-				return
-			}
+		if s.PDU == C.SMS_Status_Report {
+			sms.Report = true
+		}
+		if e := C.GSM_DeleteSMS(sm.g, &s); e != C.ERR_NONE {
+			err = Error(e)
+			return
 		}
 	}
 	return
