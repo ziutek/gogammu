@@ -196,12 +196,21 @@ func encodeUTF8(in *C.uchar) string {
 	return C.GoString(&out[0])
 }
 
+func goTime(t *C.GSM_DateTime) time.Time {
+	return time.Date(
+		int(t.Year), time.Month(t.Month), int(t.Day),
+		int(t.Hour), int(t.Minute), int(t.Second), 0,
+		time.UTC,
+	).Add(time.Duration(t.Timezone) * time.Second)
+}
+
 type SMS struct {
 	Number, Text string
+	Time         time.Time
 	Report       bool // True if this message is a delivery report
 }
 
-// Reads and deletes first avaliable message.
+// Read and deletes first avaliable message.
 // Returns io.EOF if there is no more messages to read
 func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 	var msms C.GSM_MultiSMSMessage
@@ -213,9 +222,11 @@ func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 		}
 		return
 	}
+	s := msms.SMS[0]
+	sms.Number = encodeUTF8(&s.Number[0])
+	sms.Time = goTime(&s.DateTime)
 	for i := 0; i < int(msms.Number); i++ {
-		s := msms.SMS[i]
-		sms.Number = encodeUTF8(&s.Number[0])
+		s = msms.SMS[i]
 		if s.Coding == C.SMS_Coding_8bit {
 			continue
 		}
