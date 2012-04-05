@@ -43,11 +43,10 @@ func readLine(r *bufio.Reader) (string, bool) {
 	return string(l), true
 }
 
-const outboxInsert = "insert SMSd_Outbox values (0, now(), ?, ?, ?)"
+const outboxInsert = "insert " + outboxTable + " values (0, now(), ?, ?, ?)"
 
 func (in *Input) handle(c net.Conn) {
-	if err := in.db.PrepareOnce(&in.stmt, outboxInsert); err != nil {
-		log.Printf("Can't prepare `%s`: %s", outboxInsert, err)
+	if !prepareOnce(in.db, &in.stmt, outboxInsert) {
 		return
 	}
 	r := bufio.NewReader(c)
@@ -97,7 +96,7 @@ func (in *Input) loop() {
 
 func (in *Input) Start() error {
 	var err error
-	log.Println(in.proto, in.addr)
+	log.Println("Listen on:", in.proto, in.addr)
 	in.ln, err = net.Listen(in.proto, in.addr)
 	if err != nil {
 		return err

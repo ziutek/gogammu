@@ -16,7 +16,8 @@ var dbCfg = DbCfg{
 }
 
 const setNames = "SET NAMES utf8"
-const createOutbox = `CREATE TABLE IF NOT EXISTS SMSd_Outbox (
+const outboxTable = "SMSd_Outbox"
+const createOutbox = `CREATE TABLE IF NOT EXISTS ` + outboxTable + ` (
 	id   INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
 	time DATETIME NOT NULL,
 	src  VARCHAR(16) NOT NULL,
