@@ -5,7 +5,6 @@ import (
 	"github.com/ziutek/mymysql/autorc"
 	_ "github.com/ziutek/mymysql/native"
 	"log"
-	"strings"
 	"time"
 )
 
@@ -30,51 +29,85 @@ func NewSMSd(dbCfg DbCfg) (*SMSd, error) {
 	return smsd, nil
 }
 
-const outboxGetAll = "select * from " + outboxTable
-const outboxDel = "delete from " + outboxTable + " where id=?"
+const outboxGet = `SELECT
+	o.id, o.src, o.body
+FROM
+	` + outboxTable + ` o
+WHERE
+	EXISTS (SELECT * FROM ` + phonesTable + ` p WHERE p.msgId=o.id && !p.sent)
+`
+
+const phonesGet = `SELECT
+	id, number
+FROM
+	` + phonesTable + `
+WHERE
+	!sent && msgId=?
+`
+
+const (
+	phonesSent = "UPDATE " + phonesTable + " SET sent=? WHERE id=?"
+	outboxDel  = "DELETE FROM " + outboxTable + " WHERE id=?"
+)
 
 func (smsd *SMSd) loop() {
-	var get, del autorc.Stmt
+	var stmtOutboxGet, stmtOutboxDel, stmtPhonesGet, stmtPhonesSent autorc.Stmt
 	for {
 		time.Sleep(5 * time.Second)
-		if !prepareOnce(smsd.db, &get, outboxGetAll) {
+		if !prepareOnce(smsd.db, &stmtOutboxGet, outboxGet) {
 			continue
 		}
-		if !prepareOnce(smsd.db, &del, outboxDel) {
+		if !prepareOnce(smsd.db, &stmtOutboxDel, outboxDel) {
 			continue
 		}
-		rows, res, err := get.Exec()
+		if !prepareOnce(smsd.db, &stmtPhonesGet, phonesGet) {
+			continue
+		}
+		if !prepareOnce(smsd.db, &stmtPhonesSent, phonesSent) {
+			continue
+		}
+		msgs, res, err := stmtOutboxGet.Exec()
 		if err != nil {
-			log.Println("Can't get messages from Outbox:", err)
+			log.Println("Can't get a messages from Outbox:", err)
 			continue
 		}
-		if len(rows) == 0 {
+		if len(msgs) == 0 {
 			continue
 		}
 		if isGammuError(smsd.sm.Connect()) {
 			continue
 		}
-		id := res.Map("id")
-		src := res.Map("src")
-		dst := res.Map("dst")
-		body := res.Map("body")
+		colMid := res.Map("id")
+		colSrc := res.Map("src")
+		colBody := res.Map("body")
+		for _, msg := range msgs {
+			mid := msg.Uint(colMid)
+			src := msg.Str(colSrc)
+			body := msg.Str(colBody)
 
-	msgLoop:
-		for _, row := range rows {
-			i := row.Uint(id)
-			from := row.Str(src)
-			to := strings.Split(row.Str(dst), " ")
-			txt := row.Str(body)
+			log.Printf("#%d src=%s body='%s'", mid, src, body)
 
-			log.Printf("#%d from=%s to=%v txt='%s'", i, from, to, txt)
-			for _, number := range to {
-				if isGammuError(smsd.sm.SendLongSMS(number, txt, false)) {
-					continue msgLoop
-				}
+			phones, res, err := stmtPhonesGet.Exec(mid)
+			if err != nil {
+				log.Printf("Can't get a phone number for msg #%d: %s", mid, err)
+				continue
 			}
-
-			if _, _, err := del.Exec(i); err != nil {
-				log.Printf("Can't delete message #%d from Outbox", i)
+			colPid := res.Map("id")
+			colNum := res.Map("number")
+			for _, p := range phones {
+				pid := p.Uint(colPid)
+				num := p.Str(colNum)
+				if isGammuError(smsd.sm.SendLongSMS(num, body, false)) {
+					continue
+				}
+				_, _, err = stmtPhonesSent.Exec(time.Now(), pid)
+				if err != nil {
+					log.Printf(
+						"Can't mark a msg/phone #%d/#%d as sent: %s",
+						mid, pid, err,
+					)
+					continue
+				}
 			}
 		}
 		if isGammuError(smsd.sm.Disconnect()) {

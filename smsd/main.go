@@ -17,13 +17,27 @@ var dbCfg = DbCfg{
 
 const setNames = "SET NAMES utf8"
 const outboxTable = "SMSd_Outbox"
+const phonesTable = "SMSd_Phones"
 const createOutbox = `CREATE TABLE IF NOT EXISTS ` + outboxTable + ` (
-	id   INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
-	time DATETIME NOT NULL,
-	src  VARCHAR(16) NOT NULL,
-	dst	 VARCHAR(129) NOT NULL,
-	body TEXT NOT NULL
-) DEFAULT CHARSET=utf8`
+	id     int unsigned NOT NULL AUTO_INCREMENT,
+	time   datetime NOT NULL,
+	src    varchar(16) NOT NULL,
+	report boolean NOT NULL,
+	del    boolean NOT NULL,
+	body   text NOT NULL,
+	PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8`
+const createPhones = `CREATE TABLE IF NOT EXISTS ` + phonesTable + ` (
+	id     int unsigned NOT NULL AUTO_INCREMENT,
+	msgId  int unsigned NOT NULL,
+	number varchar(16) NOT NULL,
+	dstId  int unsigned NOT NULL,
+	sent   datetime NOT NULL,
+	report datetime NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY (msgId) REFERENCES ` + outboxTable + `(id) ON DELETE CASCADE,
+	KEY dstId (dstId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8`
 
 var (
 	ins  []*Input

@@ -2,20 +2,32 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"github.com/ziutek/mymysql/autorc"
 	_ "github.com/ziutek/mymysql/native"
 	"io"
 	"log"
 	"net"
+	"strconv"
+	"strings"
+	"time"
 )
 
-// Input represents possible source of messages
+// Message format (lines ended by CR or CRLF):
+// FROM                                - symbol of source (<=16B)
+// PHONE1[=DSTID1] PHONE2[=DSTID2] ... - list of phone numbers and dstIds
+// Lines that contain optional parameters, one parameter per line: NAME or
+// NAME VALUE. Implemented parameters:
+// report        - report required
+// delede        - delete message after sending (wait for reports, if required)
+//               - empty line
+// Message body
+
+// Input represents source of messages
 type Input struct {
-	db          *autorc.Conn
-	stmt        autorc.Stmt
-	proto, addr string
-	ln          net.Listener
+	db                         *autorc.Conn
+	outboxInsert, phonesInsert autorc.Stmt
+	proto, addr                string
+	ln                         net.Listener
 }
 
 func NewInput(proto, addr string, dbCfg DbCfg) *Input {
@@ -26,27 +38,30 @@ func NewInput(proto, addr string, dbCfg DbCfg) *Input {
 	)
 	in.db.Raw.Register(setNames)
 	in.db.Raw.Register(createOutbox)
+	in.db.Raw.Register(createPhones)
 	in.proto = proto
 	in.addr = addr
 	return in
 }
 
-func readLine(r *bufio.Reader) (string, bool) {
-	l, isPrefix, err := r.ReadLine()
-	if err != nil && isPrefix {
-		err = errors.New("line too long")
-	}
-	if err != nil {
-		log.Print("Can't read line from input: ", err)
-		return "", false
-	}
-	return string(l), true
-}
-
-const outboxInsert = "insert " + outboxTable + " values (0, now(), ?, ?, ?)"
+const outboxInsert = `INSERT ` + outboxTable + ` SET
+	time=?,
+	src=?,
+	report=?,
+	del=?,
+	body=?
+`
+const phonesInsert = `INSERT ` + phonesTable + ` SET
+	msgId=?,
+	number=?,
+	dstId=?
+`
 
 func (in *Input) handle(c net.Conn) {
-	if !prepareOnce(in.db, &in.stmt, outboxInsert) {
+	if !prepareOnce(in.db, &in.outboxInsert, outboxInsert) {
+		return
+	}
+	if !prepareOnce(in.db, &in.phonesInsert, phonesInsert) {
 		return
 	}
 	r := bufio.NewReader(c)
@@ -58,7 +73,8 @@ func (in *Input) handle(c net.Conn) {
 	if !ok {
 		return
 	}
-	// Skip following lines until first empty line
+	// Read options until first empty line
+	var del, report bool
 	for {
 		l, ok := readLine(r)
 		if !ok {
@@ -67,6 +83,12 @@ func (in *Input) handle(c net.Conn) {
 		if l == "" {
 			break
 		}
+		switch l {
+		case "report":
+			report = true
+		case "delete":
+			del = true
+		}
 	}
 	buf := make([]byte, 1024)
 	n, err := io.ReadFull(r, buf)
@@ -74,9 +96,29 @@ func (in *Input) handle(c net.Conn) {
 		log.Print("Can't read message body: ", err)
 		return
 	}
-	if _, _, err := in.stmt.Exec(from, tels, buf[:n]); err != nil {
-		log.Printf("Can't insert message from %s into Outbox", from)
+	// Insert message into Outbox
+	_, res, err := in.outboxInsert.Exec(time.Now(), from, report, del, buf[:n])
+	if err != nil {
+		log.Printf("Can't insert message from %s into Outbox: %s", from, err)
 		return
+	}
+	msgId := uint32(res.InsertId())
+	// Save phones for this message
+	for _, dst := range strings.Split(tels, " ") {
+		d := strings.SplitN(dst, "=", 2)
+		num := d[0]
+		var dstId uint64
+		if len(d) == 2 {
+			dstId, err = strconv.ParseUint(d[1], 0, 32)
+			if err != nil {
+				dstId = 0
+				log.Printf("Bad dstId=`%s` for number %s: %s", d[1], num, err)
+			}
+		}
+		_, _, err = in.phonesInsert.Exec(msgId, num, uint32(dstId))
+		if err != nil {
+			log.Printf("Can't insert phone number %s into Phones: %s", num, err)
+		}
 	}
 }
 

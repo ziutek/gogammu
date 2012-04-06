@@ -1,11 +1,25 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"github.com/ziutek/mymysql/autorc"
 	"log"
 	"os"
 	"time"
 )
+
+func readLine(r *bufio.Reader) (string, bool) {
+	l, isPrefix, err := r.ReadLine()
+	if err != nil && isPrefix {
+		err = errors.New("line too long")
+	}
+	if err != nil {
+		log.Print("Can't read line from input: ", err)
+		return "", false
+	}
+	return string(l), true
+}
 
 func prepareOnce(db *autorc.Conn, stmt *autorc.Stmt, sql string) bool {
 	err := db.PrepareOnce(stmt, sql)
