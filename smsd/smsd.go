@@ -29,29 +29,31 @@ func NewSMSd(dbCfg DbCfg) (*SMSd, error) {
 	return smsd, nil
 }
 
+// Selects messages from Outbox that have any recipient without sent flag
 const outboxGet = `SELECT
 	o.id, o.src, o.body
 FROM
 	` + outboxTable + ` o
 WHERE
-	EXISTS (SELECT * FROM ` + phonesTable + ` p WHERE p.msgId=o.id && !p.sent)
+	EXISTS (SELECT * FROM ` + recipientsTable + ` p WHERE p.msgId=o.id && !p.sent)
 `
 
-const phonesGet = `SELECT
+// Selects recipients for msgId that without sent flag
+const recipientsGet = `SELECT
 	id, number
 FROM
-	` + phonesTable + `
+	` + recipientsTable + `
 WHERE
 	!sent && msgId=?
 `
 
 const (
-	phonesSent = "UPDATE " + phonesTable + " SET sent=? WHERE id=?"
-	outboxDel  = "DELETE FROM " + outboxTable + " WHERE id=?"
+	recipientsSent = "UPDATE " + recipientsTable + " SET sent=? WHERE id=?"
+	outboxDel      = "DELETE FROM " + outboxTable + " WHERE id=?"
 )
 
 func (smsd *SMSd) loop() {
-	var stmtOutboxGet, stmtOutboxDel, stmtPhonesGet, stmtPhonesSent autorc.Stmt
+	var stmtOutboxGet, stmtOutboxDel, stmtRecipientsGet, stmtRecipientsSent autorc.Stmt
 	for {
 		time.Sleep(5 * time.Second)
 		if !prepareOnce(smsd.db, &stmtOutboxGet, outboxGet) {
@@ -60,10 +62,10 @@ func (smsd *SMSd) loop() {
 		if !prepareOnce(smsd.db, &stmtOutboxDel, outboxDel) {
 			continue
 		}
-		if !prepareOnce(smsd.db, &stmtPhonesGet, phonesGet) {
+		if !prepareOnce(smsd.db, &stmtRecipientsGet, recipientsGet) {
 			continue
 		}
-		if !prepareOnce(smsd.db, &stmtPhonesSent, phonesSent) {
+		if !prepareOnce(smsd.db, &stmtRecipientsSent, recipientsSent) {
 			continue
 		}
 		msgs, res, err := stmtOutboxGet.Exec()
@@ -87,20 +89,20 @@ func (smsd *SMSd) loop() {
 
 			log.Printf("#%d src=%s body='%s'", mid, src, body)
 
-			phones, res, err := stmtPhonesGet.Exec(mid)
+			recipients, res, err := stmtRecipientsGet.Exec(mid)
 			if err != nil {
 				log.Printf("Can't get a phone number for msg #%d: %s", mid, err)
 				continue
 			}
 			colPid := res.Map("id")
 			colNum := res.Map("number")
-			for _, p := range phones {
+			for _, p := range recipients {
 				pid := p.Uint(colPid)
 				num := p.Str(colNum)
 				if isGammuError(smsd.sm.SendLongSMS(num, body, false)) {
 					continue
 				}
-				_, _, err = stmtPhonesSent.Exec(time.Now(), pid)
+				_, _, err = stmtRecipientsSent.Exec(time.Now(), pid)
 				if err != nil {
 					log.Printf(
 						"Can't mark a msg/phone #%d/#%d as sent: %s",

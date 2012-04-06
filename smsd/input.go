@@ -24,10 +24,10 @@ import (
 
 // Input represents source of messages
 type Input struct {
-	db                         *autorc.Conn
-	outboxInsert, phonesInsert autorc.Stmt
-	proto, addr                string
-	ln                         net.Listener
+	db                             *autorc.Conn
+	outboxInsert, recipientsInsert autorc.Stmt
+	proto, addr                    string
+	ln                             net.Listener
 }
 
 func NewInput(proto, addr string, dbCfg DbCfg) *Input {
@@ -38,7 +38,7 @@ func NewInput(proto, addr string, dbCfg DbCfg) *Input {
 	)
 	in.db.Raw.Register(setNames)
 	in.db.Raw.Register(createOutbox)
-	in.db.Raw.Register(createPhones)
+	in.db.Raw.Register(createRecipients)
 	in.proto = proto
 	in.addr = addr
 	return in
@@ -51,7 +51,8 @@ const outboxInsert = `INSERT ` + outboxTable + ` SET
 	del=?,
 	body=?
 `
-const phonesInsert = `INSERT ` + phonesTable + ` SET
+
+const recipientsInsert = `INSERT ` + recipientsTable + ` SET
 	msgId=?,
 	number=?,
 	dstId=?
@@ -61,7 +62,7 @@ func (in *Input) handle(c net.Conn) {
 	if !prepareOnce(in.db, &in.outboxInsert, outboxInsert) {
 		return
 	}
-	if !prepareOnce(in.db, &in.phonesInsert, phonesInsert) {
+	if !prepareOnce(in.db, &in.recipientsInsert, recipientsInsert) {
 		return
 	}
 	r := bufio.NewReader(c)
@@ -103,7 +104,7 @@ func (in *Input) handle(c net.Conn) {
 		return
 	}
 	msgId := uint32(res.InsertId())
-	// Save phones for this message
+	// Save recipients for this message
 	for _, dst := range strings.Split(tels, " ") {
 		d := strings.SplitN(dst, "=", 2)
 		num := d[0]
@@ -115,9 +116,9 @@ func (in *Input) handle(c net.Conn) {
 				log.Printf("Bad dstId=`%s` for number %s: %s", d[1], num, err)
 			}
 		}
-		_, _, err = in.phonesInsert.Exec(msgId, num, uint32(dstId))
+		_, _, err = in.recipientsInsert.Exec(msgId, num, uint32(dstId))
 		if err != nil {
-			log.Printf("Can't insert phone number %s into Phones: %s", num, err)
+			log.Printf("Can't insert phone number %s into Recipients: %s", num, err)
 		}
 	}
 }

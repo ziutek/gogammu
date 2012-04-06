@@ -15,9 +15,12 @@ var dbCfg = DbCfg{
 	"tcp", "", "127.0.0.1:3306", "testuser", "TestPasswd9", "test",
 }
 
-const setNames = "SET NAMES utf8"
-const outboxTable = "SMSd_Outbox"
-const phonesTable = "SMSd_Phones"
+const (
+	setNames        = "SET NAMES utf8"
+	outboxTable     = "SMSd_Outbox"
+	recipientsTable = "SMSd_Recipients"
+)
+
 const createOutbox = `CREATE TABLE IF NOT EXISTS ` + outboxTable + ` (
 	id     int unsigned NOT NULL AUTO_INCREMENT,
 	time   datetime NOT NULL,
@@ -27,7 +30,8 @@ const createOutbox = `CREATE TABLE IF NOT EXISTS ` + outboxTable + ` (
 	body   text NOT NULL,
 	PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8`
-const createPhones = `CREATE TABLE IF NOT EXISTS ` + phonesTable + ` (
+
+const createRecipients = `CREATE TABLE IF NOT EXISTS ` + recipientsTable + ` (
 	id     int unsigned NOT NULL AUTO_INCREMENT,
 	msgId  int unsigned NOT NULL,
 	number varchar(16) NOT NULL,
