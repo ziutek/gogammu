@@ -104,6 +104,10 @@ func (sm *StateMachine) Connect() error {
 	return nil
 }
 
+func (sm *StateMachine) IsConnected() bool {
+	return G.GSM_IsConnected(sm.g) != 0
+}
+
 func (sm *StateMachine) Disconnect() error {
 	if e := C.GSM_TerminateConnection(sm.g); e != C.ERR_NONE {
 		return Error(e)
