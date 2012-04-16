@@ -19,7 +19,7 @@ type SMSd struct {
 	wait        bool
 
 	stmtOutboxGet, stmtRecipGet, stmtRecipSent, stmtInboxPut,
-	stmtRecipReport autorc.Stmt
+	stmtRecipReport, stmtOutboxDel autorc.Stmt
 }
 
 func NewSMSd(cfg *Config) (*SMSd, error) {
@@ -61,10 +61,7 @@ WHERE
 	!sent && msgId=?
 `
 
-const (
-	recipientsSent = "UPDATE " + recipientsTable + " SET sent=? WHERE id=?"
-	outboxDel      = "DELETE FROM " + outboxTable + " WHERE id=?"
-)
+const recipientsSent = "UPDATE " + recipientsTable + " SET sent=? WHERE id=?"
 
 // Send messages from Outbox
 func (smsd *SMSd) sendMessages() bool {
@@ -186,29 +183,65 @@ func (smsd *SMSd) recvMessages() bool {
 	return true
 }
 
+const outboxDel = `DELETE FROM
+	o
+USING
+	SMSd_Outbox o
+WHERE
+	o.del && !EXISTS(
+		SELECT
+			* 
+		FROM
+			SMSd_Recipients r
+		WHERE
+			r.msgId = o.id && (!r.sent || o.report && !r.report) 
+	)
+`
+
+func (smsd *SMSd) delMessages() bool {
+	if !prepareOnce(smsd.db, &smsd.stmtOutboxDel, outboxDel) {
+		return false
+	}
+	_, _, err := smsd.stmtOutboxDel.Exec()
+	if err != nil {
+		log.Print("Can't delete messages")
+		return false
+	}
+	return true
+
+}
+
 func (smsd *SMSd) loop() {
+	sendMsg := true
 	for {
-		if smsd.sm.IsConnected() {
-			if isGammuError(smsd.sm.Disconnect()) {
-				time.Sleep(5 * time.Second)
-				continue
-			}
-		}
 		if isGammuError(smsd.sm.Connect()) {
 			continue
 		}
-		if !smsd.sendMessages() {
-			continue
+		if sendMsg {
+			if !smsd.sendMessages() {
+				continue
+			}
 		}
 		if !smsd.recvMessages() {
 			continue
+		}
+		if sendMsg {
+			if !smsd.delMessages() {
+				continue
+			}
+		}
+		if smsd.sm.IsConnected() {
+			smsd.sm.Disconnect()
 		}
 		// Wait for some event or timeout
 		select {
 		case <-smsd.end:
 			return
 		case <-smsd.newMsg:
-		case <-time.After(61 * time.Second):
+			sendMsg = true
+		case <-time.After(17 * time.Second):
+			// send and del two times less frequently than recv
+			sendMsg = !sendMsg
 		}
 	}
 }
