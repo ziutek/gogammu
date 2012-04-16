@@ -105,7 +105,7 @@ func (sm *StateMachine) Connect() error {
 }
 
 func (sm *StateMachine) IsConnected() bool {
-	return G.GSM_IsConnected(sm.g) != 0
+	return C.GSM_IsConnected(sm.g) != 0
 }
 
 func (sm *StateMachine) Disconnect() error {
@@ -205,13 +205,14 @@ func goTime(t *C.GSM_DateTime) time.Time {
 		int(t.Year), time.Month(t.Month), int(t.Day),
 		int(t.Hour), int(t.Minute), int(t.Second), 0,
 		time.UTC,
-	).Add(time.Duration(t.Timezone) * time.Second)
+	).Add(-time.Second * time.Duration(t.Timezone)).Local()
 }
 
 type SMS struct {
-	Number, Text string
-	Time         time.Time
-	Report       bool // True if this message is a delivery report
+	Time   time.Time
+	Number string
+	Report bool // True if this message is a delivery report
+	Body   string
 }
 
 // Read and deletes first avaliable message.
@@ -229,12 +230,13 @@ func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 	s := msms.SMS[0]
 	sms.Number = encodeUTF8(&s.Number[0])
 	sms.Time = goTime(&s.DateTime)
+	//sms.Time = goTime(&s.SMSCTime)
 	for i := 0; i < int(msms.Number); i++ {
 		s = msms.SMS[i]
 		if s.Coding == C.SMS_Coding_8bit {
 			continue
 		}
-		sms.Text += encodeUTF8(&s.Text[0])
+		sms.Body += encodeUTF8(&s.Text[0])
 		if s.PDU == C.SMS_Status_Report {
 			sms.Report = true
 		}
