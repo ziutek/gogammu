@@ -9,79 +9,55 @@ import (
 	"syscall"
 )
 
-type DbCfg struct{ Proto, Saddr, Daddr, User, Pass, Db string }
-
-var dbCfg = DbCfg{
-	"tcp", "", "127.0.0.1:3306", "testuser", "TestPasswd9", "test",
-}
-
-const (
-	setNames        = "SET NAMES utf8"
-	outboxTable     = "SMSd_Outbox"
-	recipientsTable = "SMSd_Recipients"
-)
-
-const createOutbox = `CREATE TABLE IF NOT EXISTS ` + outboxTable + ` (
-	id     int unsigned NOT NULL AUTO_INCREMENT,
-	time   datetime NOT NULL,
-	src    varchar(16) NOT NULL,
-	report boolean NOT NULL,
-	del    boolean NOT NULL,
-	body   text NOT NULL,
-	PRIMARY KEY (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8`
-
-const createRecipients = `CREATE TABLE IF NOT EXISTS ` + recipientsTable + ` (
-	id     int unsigned NOT NULL AUTO_INCREMENT,
-	msgId  int unsigned NOT NULL,
-	number varchar(16) NOT NULL,
-	dstId  int unsigned NOT NULL,
-	sent   datetime NOT NULL,
-	report datetime NOT NULL,
-	PRIMARY KEY (id),
-	FOREIGN KEY (msgId) REFERENCES ` + outboxTable + `(id) ON DELETE CASCADE,
-	KEY dstId (dstId)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8`
-
 var (
+	cfg  Config
 	ins  []*Input
 	smsd *SMSd
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s LISTEN_ADDR ...\n", os.Args[0])
+	if len(os.Args) != 2 {
+		fmt.Fprintf(os.Stderr, "Usage: %s CONFIG_FILE\n", os.Args[0])
+		os.Exit(1)
+	}
+	cf, err := os.Open(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Can't open configuration file:", err)
+		os.Exit(1)
+	}
+	err = cfg.Read(cf)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Can't read configuration file:", err)
 		os.Exit(1)
 	}
 
-	smsd, err := NewSMSd(dbCfg)
+	smsd, err = NewSMSd(&cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 
-	ins = make([]*Input, len(os.Args)-1)
-	for i, a := range os.Args[1:] {
+	ins = make([]*Input, len(cfg.Listen))
+	for i, a := range cfg.Listen {
 		proto := "tcp"
 		if strings.IndexRune(a, ':') == -1 {
 			proto = "unix"
 		}
-		ins[i] = NewInput(proto, a, dbCfg)
+		ins[i] = NewInput(smsd, proto, a, &cfg)
 	}
 
 	smsd.Start()
+	defer smsd.Stop()
+
 	for _, in := range ins {
 		if err := in.Start(); err != nil {
 			log.Print("Can't start input thread: ", in)
+			return
 		}
+		defer in.Stop()
 	}
 
 	sc := make(chan os.Signal, 2)
 	signal.Notify(sc, syscall.SIGTERM, syscall.SIGINT)
 	<-sc
-
-	for _, in := range ins {
-		in.Stop()
-	}
-	smsd.Stop()
 }

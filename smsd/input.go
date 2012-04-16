@@ -22,29 +22,37 @@ import (
 //               - empty line
 // Message body
 
+// You can use optional dstIds to link recipients with your other data in db.
+
 // Input represents source of messages
 type Input struct {
+	smsd                           *SMSd
 	db                             *autorc.Conn
-	outboxInsert, recipientsInsert autorc.Stmt
+	knownSrc                       []string
 	proto, addr                    string
 	ln                             net.Listener
+	outboxInsert, recipientsInsert autorc.Stmt
 }
 
-func NewInput(proto, addr string, dbCfg DbCfg) *Input {
+func NewInput(smsd *SMSd, proto, addr string, cfg *Config) *Input {
 	in := new(Input)
+	in.smsd = smsd
 	in.db = autorc.New(
-		dbCfg.Proto, dbCfg.Saddr, dbCfg.Daddr,
-		dbCfg.User, dbCfg.Pass, dbCfg.Db,
+		cfg.Db.Proto, cfg.Db.Saddr, cfg.Db.Daddr,
+		cfg.Db.User, cfg.Db.Pass, cfg.Db.Name,
 	)
 	in.db.Raw.Register(setNames)
 	in.db.Raw.Register(createOutbox)
 	in.db.Raw.Register(createRecipients)
 	in.proto = proto
 	in.addr = addr
+	in.knownSrc = cfg.Source
 	return in
 }
 
-const outboxInsert = `INSERT ` + outboxTable + ` SET
+const outboxInsert = `INSERT
+	` + outboxTable + `
+SET
 	time=?,
 	src=?,
 	report=?,
@@ -68,6 +76,14 @@ func (in *Input) handle(c net.Conn) {
 	r := bufio.NewReader(c)
 	from, ok := readLine(r)
 	if !ok {
+		return
+	}
+	i := 0
+	for i < len(in.knownSrc) && in.knownSrc[i] != from {
+		i++
+	}
+	if i == len(in.knownSrc) {
+		log.Println("Unknown source:", from)
 		return
 	}
 	tels, ok := readLine(r)
@@ -108,6 +124,10 @@ func (in *Input) handle(c net.Conn) {
 	for _, dst := range strings.Split(tels, " ") {
 		d := strings.SplitN(dst, "=", 2)
 		num := d[0]
+		if !checkNumber(num) {
+			log.Printf("Bad phone number: '%s' for message #%d.", msgId)
+			continue
+		}
 		var dstId uint64
 		if len(d) == 2 {
 			dstId, err = strconv.ParseUint(d[1], 0, 32)
@@ -121,6 +141,8 @@ func (in *Input) handle(c net.Conn) {
 			log.Printf("Can't insert phone number %s into Recipients: %s", num, err)
 		}
 	}
+	// Inform SMSd about new message
+	in.smsd.NewMsg()
 }
 
 func (in *Input) loop() {

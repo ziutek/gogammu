@@ -4,16 +4,25 @@ import (
 	"github.com/ziutek/gogammu"
 	"github.com/ziutek/mymysql/autorc"
 	_ "github.com/ziutek/mymysql/native"
+	"io"
 	"log"
+	"strings"
 	"time"
+	"unicode"
 )
 
 type SMSd struct {
-	db *autorc.Conn
 	sm *gammu.StateMachine
+	db *autorc.Conn
+
+	end, newMsg chan event
+	wait        bool
+
+	stmtOutboxGet, stmtRecipGet, stmtRecipSent, stmtInboxPut,
+	stmtRecipReport autorc.Stmt
 }
 
-func NewSMSd(dbCfg DbCfg) (*SMSd, error) {
+func NewSMSd(cfg *Config) (*SMSd, error) {
 	var err error
 	smsd := new(SMSd)
 	smsd.sm, err = gammu.NewStateMachine("")
@@ -21,24 +30,29 @@ func NewSMSd(dbCfg DbCfg) (*SMSd, error) {
 		return nil, err
 	}
 	smsd.db = autorc.New(
-		dbCfg.Proto, dbCfg.Saddr, dbCfg.Daddr,
-		dbCfg.User, dbCfg.Pass, dbCfg.Db,
+		cfg.Db.Proto, cfg.Db.Saddr, cfg.Db.Daddr,
+		cfg.Db.User, cfg.Db.Pass, cfg.Db.Name,
 	)
 	smsd.db.Raw.Register(setNames)
 	smsd.db.Raw.Register(createOutbox)
+	smsd.db.Raw.Register(createRecipients)
+	smsd.db.Raw.Register(createInbox)
+	smsd.db.Raw.Register(setLocPrefix)
+	smsd.end = make(chan event)
+	smsd.newMsg = make(chan event)
 	return smsd, nil
 }
 
-// Selects messages from Outbox that have any recipient without sent flag
+// Selects messages from Outbox that have any recipient without sent flag set
 const outboxGet = `SELECT
-	o.id, o.src, o.body
+	o.id, o.src, o.report, o.body
 FROM
 	` + outboxTable + ` o
 WHERE
 	EXISTS (SELECT * FROM ` + recipientsTable + ` p WHERE p.msgId=o.id && !p.sent)
 `
 
-// Selects recipients for msgId that without sent flag
+// Selects all recipients without sent flag set for givem msgId
 const recipientsGet = `SELECT
 	id, number
 FROM
@@ -52,68 +66,149 @@ const (
 	outboxDel      = "DELETE FROM " + outboxTable + " WHERE id=?"
 )
 
-func (smsd *SMSd) loop() {
-	var stmtOutboxGet, stmtOutboxDel, stmtRecipientsGet, stmtRecipientsSent autorc.Stmt
-	for {
-		time.Sleep(5 * time.Second)
-		if !prepareOnce(smsd.db, &stmtOutboxGet, outboxGet) {
-			continue
-		}
-		if !prepareOnce(smsd.db, &stmtOutboxDel, outboxDel) {
-			continue
-		}
-		if !prepareOnce(smsd.db, &stmtRecipientsGet, recipientsGet) {
-			continue
-		}
-		if !prepareOnce(smsd.db, &stmtRecipientsSent, recipientsSent) {
-			continue
-		}
-		msgs, res, err := stmtOutboxGet.Exec()
+// Send messages from Outbox
+func (smsd *SMSd) sendMessages() bool {
+	if !prepareOnce(smsd.db, &smsd.stmtOutboxGet, outboxGet) {
+		return false
+	}
+	if !prepareOnce(smsd.db, &smsd.stmtRecipGet, recipientsGet) {
+		return false
+	}
+	if !prepareOnce(smsd.db, &smsd.stmtRecipSent, recipientsSent) {
+		return false
+	}
+	msgs, res, err := smsd.stmtOutboxGet.Exec()
+	if err != nil {
+		log.Println("Can't get a messages from Outbox:", err)
+		return false
+	}
+	colMid := res.Map("id")
+	colReport := res.Map("report")
+	colBody := res.Map("body")
+	for _, msg := range msgs {
+		mid := msg.Uint(colMid)
+		report := msg.Bool(colReport)
+		body := msg.Str(colBody)
+
+		recipients, res, err := smsd.stmtRecipGet.Exec(mid)
 		if err != nil {
-			log.Println("Can't get a messages from Outbox:", err)
-			continue
+			log.Printf("Can't get a phone number for msg #%d: %s", mid, err)
+			return false
 		}
-		if len(msgs) == 0 {
-			continue
+		colPid := res.Map("id")
+		colNum := res.Map("number")
+		for _, p := range recipients {
+			pid := p.Uint(colPid)
+			num := p.Str(colNum)
+			if !checkNumber(num) {
+				continue
+			}
+			if isGammuError(smsd.sm.SendLongSMS(num, body, report)) {
+				// Phone error or bad values
+				continue
+			}
+			_, _, err = smsd.stmtRecipSent.Exec(time.Now(), pid)
+			if err != nil {
+				log.Printf(
+					"Can't mark a msg/recip #%d/#%d as sent: %s",
+					mid, pid, err,
+				)
+				return false
+			}
+		}
+	}
+	return true
+}
+
+const inboxPut = `INSERT
+	` + inboxTable + `
+SET
+	time=?,
+	number=?,
+	body=?
+`
+
+const recipReport = `UPDATE
+	` + recipientsTable + `
+SET
+	report=?
+WHERE
+	!report && (number=? || concat(@localPrefix, number)=?)
+ORDER BY
+	abs(timediff(?, sent))
+LIMIT 1`
+
+func (smsd *SMSd) recvMessages() bool {
+	if !prepareOnce(smsd.db, &smsd.stmtInboxPut, inboxPut) {
+		return false
+	}
+	if !prepareOnce(smsd.db, &smsd.stmtRecipReport, recipReport) {
+		return false
+	}
+	for {
+		sms, err := smsd.sm.GetSMS()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Printf("Can't get message from phone: %s", err)
+			return false
+		}
+		if sms.Report {
+			// Find a message and sender in Outbox and mark it
+			m := strings.TrimFunc(sms.Body, unicode.IsSpace)
+			if strings.ToLower(m) == "delivered" {
+				_, _, err = smsd.stmtRecipReport.Exec(
+					sms.Time, sms.Number, sms.Number, sms.Time,
+				)
+				if err != nil {
+					log.Printf(
+						"Can't mark recipient %s as reported: %s",
+						sms.Number, err,
+					)
+					return false
+				}
+			}
+		} else {
+			// Save a message in Inbox
+			log.Printf("Message from: %s, date: %s, body: %s",
+				sms.Number, sms.Time, sms.Body)
+			_, _, err = smsd.stmtInboxPut.Exec(sms.Time, sms.Number, sms.Body)
+			if err != nil {
+				log.Printf(
+					"Can't insert message from %s into Inbox: %s",
+					sms.Number, err,
+				)
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (smsd *SMSd) loop() {
+	for {
+		if smsd.sm.IsConnected() {
+			if isGammuError(smsd.sm.Disconnect()) {
+				time.Sleep(5 * time.Second)
+				continue
+			}
 		}
 		if isGammuError(smsd.sm.Connect()) {
 			continue
 		}
-		colMid := res.Map("id")
-		colSrc := res.Map("src")
-		colBody := res.Map("body")
-		for _, msg := range msgs {
-			mid := msg.Uint(colMid)
-			src := msg.Str(colSrc)
-			body := msg.Str(colBody)
-
-			log.Printf("#%d src=%s body='%s'", mid, src, body)
-
-			recipients, res, err := stmtRecipientsGet.Exec(mid)
-			if err != nil {
-				log.Printf("Can't get a phone number for msg #%d: %s", mid, err)
-				continue
-			}
-			colPid := res.Map("id")
-			colNum := res.Map("number")
-			for _, p := range recipients {
-				pid := p.Uint(colPid)
-				num := p.Str(colNum)
-				if isGammuError(smsd.sm.SendLongSMS(num, body, false)) {
-					continue
-				}
-				_, _, err = stmtRecipientsSent.Exec(time.Now(), pid)
-				if err != nil {
-					log.Printf(
-						"Can't mark a msg/phone #%d/#%d as sent: %s",
-						mid, pid, err,
-					)
-					continue
-				}
-			}
-		}
-		if isGammuError(smsd.sm.Disconnect()) {
+		if !smsd.sendMessages() {
 			continue
+		}
+		if !smsd.recvMessages() {
+			continue
+		}
+		// Wait for some event or timeout
+		select {
+		case <-smsd.end:
+			return
+		case <-smsd.newMsg:
+		case <-time.After(61 * time.Second):
 		}
 	}
 }
@@ -123,5 +218,12 @@ func (smsd *SMSd) Start() {
 }
 
 func (smsd *SMSd) Stop() {
+	smsd.end <- event{}
+}
 
+func (smsd *SMSd) NewMsg() {
+	select {
+	case smsd.newMsg <- event{}:
+	default:
+	}
 }
