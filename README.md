@@ -14,7 +14,7 @@ For run it in background use *runit* or *daemontools*.
 
 *gogammu/sms* simple library that implements *smsd protocol*. Use it for sending
 messages via *smsd*
-[documentation](http://gopkgdoc.appspot.com/pkg/github.com/ziutek/gogammu/sms).
+([documentation](http://gopkgdoc.appspot.com/pkg/github.com/ziutek/gogammu/sms)).
 
 Protocol description:
 
