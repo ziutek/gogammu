@@ -209,10 +209,11 @@ func goTime(t *C.GSM_DateTime) time.Time {
 }
 
 type SMS struct {
-	Time   time.Time
-	Number string
-	Report bool // True if this message is a delivery report
-	Body   string
+	Time     time.Time
+	SMSCTime time.Time
+	Number   string
+	Report   bool // True if this message is a delivery report
+	Body     string
 }
 
 // Read and deletes first avaliable message.
@@ -227,10 +228,11 @@ func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 		}
 		return
 	}
-	s := msms.SMS[0]
+	s := msms.SMS[msms.Number-1]
 	sms.Number = encodeUTF8(&s.Number[0])
 	sms.Time = goTime(&s.DateTime)
-	//sms.Time = goTime(&s.SMSCTime)
+	sms.SMSCTime = goTime(&s.SMSCTime)
+
 	for i := 0; i < int(msms.Number); i++ {
 		s = msms.SMS[i]
 		if s.Coding == C.SMS_Coding_8bit {

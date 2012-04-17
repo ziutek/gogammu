@@ -156,7 +156,7 @@ func (smsd *SMSd) recvMessages() bool {
 			m := strings.TrimFunc(sms.Body, unicode.IsSpace)
 			if strings.ToLower(m) == "delivered" {
 				_, _, err = smsd.stmtRecipReport.Exec(
-					sms.Time, sms.Number, sms.Number, sms.Time,
+					sms.SMSCTime, sms.Number, sms.Number, sms.Time,
 				)
 				if err != nil {
 					log.Printf(

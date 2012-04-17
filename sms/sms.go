@@ -13,9 +13,9 @@ type Sender struct {
 	Report bool   // Is report required?
 }
 
-// Sends txt as SMS to recipents. Recipient need to be specified as
+// Sends txt as SMS to recipients. Recipient need to be specified as
 // PhoneNumber[=DstId] You can use DstId to link recipient with some other
-// data in your database.
+// data in your database. Send is thread-safe.
 func (s *Sender) Send(txt string, recipients ...string) error {
 	if len(recipients) == 0 {
 		return nil
