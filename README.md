@@ -16,9 +16,9 @@ For run it in background use *runit* or *daemontools*.
 messages via *smsd*
 ([documentation](http://gopkgdoc.appspot.com/pkg/github.com/ziutek/gogammu/sms)).
 
-Protocol description:
+*Protocol description*
 
-1. Client sends:
+Client sends:
 
 	FROM                                - symbol of source (<=16B)
 	PHONE1[=DSTID1] PHONE2[=DSTID2] ... - list of phone numbers and dstIds
@@ -30,6 +30,6 @@ Protocol description:
 	Message body
 	.             - '.' as first and only character in line
 
-2. Server replies with 'OK' line or with error message and disconnects.
+Server replies with 'OK' line or with error message and disconnects.
 
-3. Client reads response and disconnects.
+Client reads response and disconnects.
