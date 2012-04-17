@@ -9,7 +9,7 @@ import (
 )
 
 type Sender struct {
-	Id     string // Server identifier. See Source field in smsd.cfg
+	Id     string // Sender identifier. See Source field in smsd.cfg
 	Server string // IP address:port or unix domain socket path
 	Delete bool   // Will message need to be deleted after sent/reported?
 	Report bool   // Is report required?
