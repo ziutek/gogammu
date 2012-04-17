@@ -18,6 +18,8 @@ messages via *smsd*
 
 Protocol description:
 
+1. Client sends:
+
 	FROM                                - symbol of source (<=16B)
 	PHONE1[=DSTID1] PHONE2[=DSTID2] ... - list of phone numbers and dstIds
 	Lines that contain optional parameters, one parameter per line: NAME or
@@ -27,3 +29,7 @@ Protocol description:
 	              - empty line
 	Message body
 	.             - '.' as first and only character in line
+
+2. Server replies with 'OK' line or with error message and disconnects.
+
+3. Client reads response and disconnects.
