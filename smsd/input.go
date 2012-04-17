@@ -21,6 +21,7 @@ import (
 // delede        - delete message after sending (wait for reports, if required)
 //               - empty line
 // Message body
+// .             - '.' as first and only character in line
 
 // You can use optional dstIds to link recipients with your other data in db.
 
@@ -67,6 +68,8 @@ const recipientsInsert = `INSERT ` + recipientsTable + ` SET
 `
 
 func (in *Input) handle(c net.Conn) {
+	defer c.Close()
+
 	if !prepareOnce(in.db, &in.outboxInsert, outboxInsert) {
 		return
 	}
@@ -107,16 +110,28 @@ func (in *Input) handle(c net.Conn) {
 			del = true
 		}
 	}
-	buf := make([]byte, 1024)
-	n, err := io.ReadFull(r, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		log.Print("Can't read message body: ", err)
-		return
+	// Read a message body
+	var body []byte
+	var prevIsPrefix bool
+	for {
+		buf, isPrefix, err := r.ReadLine()
+		if err != nil {
+			log.Print("Can't read message body: ", err)
+			return
+		}
+		if !isPrefix && !prevIsPrefix && len(buf) == 1 && buf[0] == '.' {
+			break
+		}
+		body = append(body, '\n')
+		body = append(body, buf...)
+		prevIsPrefix = isPrefix
 	}
 	// Insert message into Outbox
-	_, res, err := in.outboxInsert.Exec(time.Now(), from, report, del, buf[:n])
+	_, res, err := in.outboxInsert.Exec(time.Now(), from, report, del, body[1:])
 	if err != nil {
 		log.Printf("Can't insert message from %s into Outbox: %s", from, err)
+		// Send error response, ignore errors
+		io.WriteString(c, "DB error (can't insert message)\n")
 		return
 	}
 	msgId := uint32(res.InsertId())
@@ -125,7 +140,9 @@ func (in *Input) handle(c net.Conn) {
 		d := strings.SplitN(dst, "=", 2)
 		num := d[0]
 		if !checkNumber(num) {
-			log.Printf("Bad phone number: '%s' for message #%d.", msgId)
+			log.Printf("Bad phone number: '%s' for message #%d.", num, msgId)
+			// Send error response, ignore errors
+			io.WriteString(c, "Bad phone number\n")
 			continue
 		}
 		var dstId uint64
@@ -133,14 +150,21 @@ func (in *Input) handle(c net.Conn) {
 			dstId, err = strconv.ParseUint(d[1], 0, 32)
 			if err != nil {
 				dstId = 0
-				log.Printf("Bad dstId=`%s` for number %s: %s", d[1], num, err)
+				log.Printf("Bad DstId=`%s` for number %s: %s", d[1], num, err)
+				// Send error response, ignore errors
+				io.WriteString(c, "Bad DstId\n")
 			}
 		}
 		_, _, err = in.recipientsInsert.Exec(msgId, num, uint32(dstId))
 		if err != nil {
 			log.Printf("Can't insert phone number %s into Recipients: %s", num, err)
+			// Send error response, ignore errors
+			io.WriteString(c, "DB error (can't insert phone number)\n")
 		}
 	}
+	// Send OK as response, ignore errors
+	io.WriteString(c, "OK\n")
+
 	// Inform SMSd about new message
 	in.smsd.NewMsg()
 }

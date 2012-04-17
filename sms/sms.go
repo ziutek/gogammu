@@ -2,6 +2,8 @@ package sms
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"net"
 	"strings"
 )
@@ -59,17 +61,28 @@ func (s *Sender) Send(txt string, recipients ...string) error {
 			return err
 		}
 	}
-
 	if err = newLine(w); err != nil {
 		return err
 	}
 
-	if _, err = w.WriteString(txt); err != nil {
+	if _, err = w.WriteString(strings.TrimSpace(txt)); err != nil {
 		return err
 	}
-
+	if err = writeln(w, "\n."); err != nil {
+		return err
+	}
 	if err = w.Flush(); err != nil {
 		return err
+	}
+	// Read OK response
+	buf, _, err := bufio.NewReader(c).ReadLine()
+	if err != nil {
+		return err
+	}
+	buf = bytes.TrimSpace(buf)
+	if !bytes.Equal(buf, []byte{'O', 'K'}) {
+		c.Close()
+		return errors.New(string(buf))
 	}
 	return c.Close()
 }

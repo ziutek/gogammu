@@ -8,7 +8,6 @@ import (
 	"log"
 	"strings"
 	"time"
-	"unicode"
 )
 
 type SMSd struct {
@@ -153,7 +152,7 @@ func (smsd *SMSd) recvMessages() bool {
 		}
 		if sms.Report {
 			// Find a message and sender in Outbox and mark it
-			m := strings.TrimFunc(sms.Body, unicode.IsSpace)
+			m := strings.TrimSpace(sms.Body)
 			if strings.ToLower(m) == "delivered" {
 				_, _, err = smsd.stmtRecipReport.Exec(
 					sms.SMSCTime, sms.Number, sms.Number, sms.Time,

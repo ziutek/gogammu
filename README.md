@@ -26,3 +26,4 @@ Protocol description:
 	delede        - delete message after sending (wait for reports, if required)
 	              - empty line
 	Message body
+	.             - '.' as first and only character in line
