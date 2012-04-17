@@ -87,6 +87,8 @@ func (in *Input) handle(c net.Conn) {
 	}
 	if i == len(in.knownSrc) {
 		log.Println("Unknown source:", from)
+		time.Sleep(5 * time.Second)
+		io.WriteString(c, "Unknown source\n")
 		return
 	}
 	tels, ok := readLine(r)
