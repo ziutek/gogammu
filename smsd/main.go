@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -17,23 +16,25 @@ var (
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s CONFIG_FILE\n", os.Args[0])
+		log.Printf("Usage: %s CONFIG_FILE\n", os.Args[0])
 		os.Exit(1)
 	}
 	cf, err := os.Open(os.Args[1])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Can't open configuration file:", err)
+		log.Println("Can't open configuration file:", err)
 		os.Exit(1)
 	}
 	err = cfg.Read(cf)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Can't read configuration file:", err)
+		log.Println("Can't read configuration file:", err)
 		os.Exit(1)
 	}
 
+	setupLogging(cfg.Logging)
+
 	smsd, err = NewSMSd(&cfg)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		log.Println("Error:", err)
 		os.Exit(1)
 	}
 
@@ -58,6 +59,36 @@ func main() {
 	}
 
 	sc := make(chan os.Signal, 2)
-	signal.Notify(sc, syscall.SIGTERM, syscall.SIGINT)
-	<-sc
+	signal.Notify(sc, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	for sig := range sc {
+		if sig == syscall.SIGHUP {
+			setupLogging(cfg.Logging)
+		} else {
+			break
+		}
+	}
+}
+
+var logFile *os.File
+
+func setupLogging(fname string) {
+	if fname == "" {
+		return
+	}
+	newFile, err := os.Create(fname)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	prevFile := logFile
+	logFile = newFile
+	log.SetOutput(logFile)
+	log.Println("Start logging to file:", fname)
+	if prevFile != nil {
+		err = prevFile.Close()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	}
 }

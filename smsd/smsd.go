@@ -210,37 +210,39 @@ func (smsd *SMSd) delMessages() bool {
 
 }
 
+func (smsd *SMSd) sendRecvDel(send bool) {
+	if isGammuError(smsd.sm.Connect()) {
+		return
+	}
+	defer smsd.sm.Disconnect()
+	if send {
+		if !smsd.sendMessages() {
+			return
+		}
+	}
+	if !smsd.recvMessages() {
+		return
+	}
+	if send {
+		if !smsd.delMessages() {
+			return
+		}
+	}
+}
+
 func (smsd *SMSd) loop() {
-	sendMsg := true
+	send := true
 	for {
-		if isGammuError(smsd.sm.Connect()) {
-			continue
-		}
-		if sendMsg {
-			if !smsd.sendMessages() {
-				continue
-			}
-		}
-		if !smsd.recvMessages() {
-			continue
-		}
-		if sendMsg {
-			if !smsd.delMessages() {
-				continue
-			}
-		}
-		if smsd.sm.IsConnected() {
-			smsd.sm.Disconnect()
-		}
+		smsd.sendRecvDel(send)
 		// Wait for some event or timeout
 		select {
 		case <-smsd.end:
 			return
 		case <-smsd.newMsg:
-			sendMsg = true
+			send = true
 		case <-time.After(17 * time.Second):
 			// send and del two times less frequently than recv
-			sendMsg = !sendMsg
+			send = !send
 		}
 	}
 }
