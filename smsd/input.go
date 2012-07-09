@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -191,6 +192,12 @@ func (in *Input) Start() error {
 	in.ln, err = net.Listen(in.proto, in.addr)
 	if err != nil {
 		return err
+	}
+	if in.proto == "unix" {
+		err = os.Chmod(in.addr, 0666)
+		if err != nil {
+			return err
+		}
 	}
 	go in.loop()
 	return nil
