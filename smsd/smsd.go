@@ -167,8 +167,6 @@ func (smsd *SMSd) recvMessages() bool {
 			}
 		} else {
 			// Save a message in Inbox
-			log.Printf("Message from: %s, date: %s, body: %s",
-				sms.Number, sms.Time, sms.Body)
 			_, _, err = smsd.stmtInboxPut.Exec(sms.Time, sms.Number, sms.Body)
 			if err != nil {
 				log.Printf(
