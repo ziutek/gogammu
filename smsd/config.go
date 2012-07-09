@@ -13,7 +13,7 @@ type Config struct {
 	Db      struct{ Proto, Saddr, Daddr, User, Pass, Name string }
 	Listen  []string
 	Source  []string
-	Logging string
+	LogFile string
 }
 
 func syntaxError(ln int) error {
@@ -76,8 +76,10 @@ func (c *Config) Read(r io.Reader) error {
 			case "Listen":
 				c.Listen = a
 			}
-		case "Logging":
-			c.Logging = l
+		case "LogFile":
+			c.LogFile = l
+		default:
+			syntaxError(i)
 		}
 
 	}

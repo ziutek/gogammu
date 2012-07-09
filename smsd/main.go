@@ -30,7 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLogging(cfg.Logging)
+	setupLogging()
 
 	smsd, err = NewSMSd(&cfg)
 	if err != nil {
@@ -62,7 +62,7 @@ func main() {
 	signal.Notify(sc, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	for sig := range sc {
 		if sig == syscall.SIGHUP {
-			setupLogging(cfg.Logging)
+			setupLogging()
 		} else {
 			break
 		}
@@ -71,11 +71,11 @@ func main() {
 
 var logFile *os.File
 
-func setupLogging(fname string) {
-	if fname == "" {
+func setupLogging() {
+	if cfg.LogFile == "" {
 		return
 	}
-	newFile, err := os.Create(fname)
+	newFile, err := os.Create(cfg.LogFile)
 	if err != nil {
 		log.Println(err)
 		return
@@ -83,7 +83,7 @@ func setupLogging(fname string) {
 	prevFile := logFile
 	logFile = newFile
 	log.SetOutput(logFile)
-	log.Println("Start logging to file:", fname)
+	log.Println("Start logging to file:", cfg.LogFile)
 	if prevFile != nil {
 		err = prevFile.Close()
 		if err != nil {
