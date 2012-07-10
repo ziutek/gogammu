@@ -40,7 +40,7 @@ func isGammuError(e error) bool {
 	if e == nil {
 		return false
 	}
-	log.Println("Can't communicate with phone:", e)
+	log.Println("Error while communicating with the GSM device:", e)
 	time.Sleep(60 * time.Second)
 	return true
 }

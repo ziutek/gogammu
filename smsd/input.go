@@ -34,6 +34,7 @@ type Input struct {
 	proto, addr                    string
 	ln                             net.Listener
 	outboxInsert, recipientsInsert autorc.Stmt
+	stop                           bool
 }
 
 func NewInput(smsd *SMSd, proto, addr string, cfg *Config) *Input {
@@ -176,11 +177,13 @@ func (in *Input) loop() {
 	for {
 		c, err := in.ln.Accept()
 		if err != nil {
-			log.Print("Can't accept connection: ", err)
-			if e, ok := err.(net.Error); ok && e.Temporary() {
-				continue
+			if in.stop {
+				return
 			}
-			return
+			log.Print("Can't accept connection: ", err)
+			if e, ok := err.(net.Error); !ok || !e.Temporary() {
+				return
+			}
 		}
 		go in.handle(c)
 	}
@@ -188,7 +191,9 @@ func (in *Input) loop() {
 
 func (in *Input) Start() error {
 	var err error
-	log.Println("Listen on:", in.proto, in.addr)
+	if in.proto == "unix" {
+		os.Remove(in.addr)
+	}
 	in.ln, err = net.Listen(in.proto, in.addr)
 	if err != nil {
 		return err
@@ -199,11 +204,14 @@ func (in *Input) Start() error {
 			return err
 		}
 	}
+	log.Println("Listen on:", in.proto, in.addr)
+	in.stop = false
 	go in.loop()
 	return nil
 }
 
 func (in *Input) Stop() error {
+	in.stop = true
 	return in.ln.Close()
 }
 

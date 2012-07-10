@@ -113,6 +113,20 @@ func (sm *StateMachine) Disconnect() error {
 	return nil
 }
 
+func (sm *StateMachine) Reset() error {
+	if e := C.GSM_Reset(sm.g, 0); e != C.ERR_NONE {
+		return Error(e)
+	}
+	return nil
+}
+
+func (sm *StateMachine) HardReset() error {
+	if e := C.GSM_Reset(sm.g, 1); e != C.ERR_NONE {
+		return Error(e)
+	}
+	return nil
+}
+
 func decodeUTF8(out *C.uchar, in string) {
 	cn := C.CString(in)
 	C.DecodeUTF8(out, cn, C.int(len(in)))

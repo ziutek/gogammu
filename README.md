@@ -9,8 +9,10 @@ doesn't depend on Gammu SMSd).
 in *Outbox*.
 3. It sends messages from *Outbox*, waits for delivery reports and deletes
 messages if necessary.
+4. It sends logs to stderr or to specified file. You have to send HUP signal to
+smsd after rotating its log file.
 
-For run it in background use *runit* or *daemontools*.
+For run it in background use *runit* or *daemontools*. 
 
 *gogammu/sms* simple library that implements *smsd protocol*. Use it for sending
 messages via *smsd*

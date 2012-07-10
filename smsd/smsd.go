@@ -63,20 +63,20 @@ WHERE
 const recipientsSent = "UPDATE " + recipientsTable + " SET sent=? WHERE id=?"
 
 // Send messages from Outbox
-func (smsd *SMSd) sendMessages() bool {
+func (smsd *SMSd) sendMessages() (gammuErr bool) {
 	if !prepareOnce(smsd.db, &smsd.stmtOutboxGet, outboxGet) {
-		return false
+		return
 	}
 	if !prepareOnce(smsd.db, &smsd.stmtRecipGet, recipientsGet) {
-		return false
+		return
 	}
 	if !prepareOnce(smsd.db, &smsd.stmtRecipSent, recipientsSent) {
-		return false
+		return
 	}
 	msgs, res, err := smsd.stmtOutboxGet.Exec()
 	if err != nil {
 		log.Println("Can't get a messages from Outbox:", err)
-		return false
+		return
 	}
 	colMid := res.Map("id")
 	colReport := res.Map("report")
@@ -89,7 +89,7 @@ func (smsd *SMSd) sendMessages() bool {
 		recipients, res, err := smsd.stmtRecipGet.Exec(mid)
 		if err != nil {
 			log.Printf("Can't get a phone number for msg #%d: %s", mid, err)
-			return false
+			return
 		}
 		colPid := res.Map("id")
 		colNum := res.Map("number")
@@ -101,7 +101,7 @@ func (smsd *SMSd) sendMessages() bool {
 			}
 			if isGammuError(smsd.sm.SendLongSMS(num, body, report)) {
 				// Phone error or bad values
-				continue
+				gammuErr = true
 			}
 			_, _, err = smsd.stmtRecipSent.Exec(time.Now(), pid)
 			if err != nil {
@@ -109,11 +109,11 @@ func (smsd *SMSd) sendMessages() bool {
 					"Can't mark a msg/recip #%d/#%d as sent: %s",
 					mid, pid, err,
 				)
-				return false
+				return
 			}
 		}
 	}
-	return true
+	return
 }
 
 const inboxPut = `INSERT
@@ -134,12 +134,12 @@ ORDER BY
 	abs(timediff(?, sent))
 LIMIT 1`
 
-func (smsd *SMSd) recvMessages() bool {
+func (smsd *SMSd) recvMessages() (gammuErr bool) {
 	if !prepareOnce(smsd.db, &smsd.stmtInboxPut, inboxPut) {
-		return false
+		return
 	}
 	if !prepareOnce(smsd.db, &smsd.stmtRecipReport, recipReport) {
-		return false
+		return
 	}
 	for {
 		sms, err := smsd.sm.GetSMS()
@@ -148,7 +148,7 @@ func (smsd *SMSd) recvMessages() bool {
 				break
 			}
 			log.Printf("Can't get message from phone: %s", err)
-			return false
+			return true
 		}
 		if sms.Report {
 			// Find a message and sender in Outbox and mark it
@@ -162,7 +162,7 @@ func (smsd *SMSd) recvMessages() bool {
 						"Can't mark recipient %s as reported: %s",
 						sms.Number, err,
 					)
-					return false
+					return
 				}
 			}
 		} else {
@@ -173,11 +173,11 @@ func (smsd *SMSd) recvMessages() bool {
 					"Can't insert message from %s into Inbox: %s",
 					sms.Number, err,
 				)
-				return false
+				return
 			}
 		}
 	}
-	return true
+	return
 }
 
 const outboxDel = `DELETE FROM
@@ -195,36 +195,33 @@ WHERE
 	)
 `
 
-func (smsd *SMSd) delMessages() bool {
+func (smsd *SMSd) delMessages() {
 	if !prepareOnce(smsd.db, &smsd.stmtOutboxDel, outboxDel) {
-		return false
+		return
 	}
 	_, _, err := smsd.stmtOutboxDel.Exec()
 	if err != nil {
-		log.Print("Can't delete messages")
-		return false
+		log.Println("Can't delete messages:", err)
+		return
 	}
-	return true
-
 }
 
 func (smsd *SMSd) sendRecvDel(send bool) {
-	if isGammuError(smsd.sm.Connect()) {
-		return
-	}
-	defer smsd.sm.Disconnect()
-	if send {
-		if !smsd.sendMessages() {
+	var gammuErr bool
+	if !smsd.sm.IsConnected() {
+		if isGammuError(smsd.sm.Connect()) {
 			return
 		}
 	}
-	if !smsd.recvMessages() {
-		return
-	}
 	if send {
-		if !smsd.delMessages() {
-			return
-		}
+		gammuErr = smsd.sendMessages()
+	}
+	gammuErr = smsd.recvMessages() || gammuErr
+	if send {
+		smsd.delMessages()
+	}
+	if gammuErr && smsd.sm.IsConnected() {
+		smsd.sm.Disconnect()
 	}
 }
 

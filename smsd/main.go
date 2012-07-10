@@ -52,7 +52,7 @@ func main() {
 
 	for _, in := range ins {
 		if err := in.Start(); err != nil {
-			log.Print("Can't start input thread: ", in)
+			log.Print("Can't start input thread: ", err)
 			return
 		}
 		defer in.Stop()
@@ -75,10 +75,14 @@ func setupLogging() {
 	if cfg.LogFile == "" {
 		return
 	}
-	newFile, err := os.Create(cfg.LogFile)
+	newFile, err := os.OpenFile(
+		cfg.LogFile,
+		os.O_WRONLY|os.O_APPEND|os.O_CREATE,
+		0620,
+	)
 	if err != nil {
 		log.Println(err)
-		return
+		os.Exit(1)
 	}
 	prevFile := logFile
 	logFile = newFile
