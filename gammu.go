@@ -40,10 +40,9 @@ func (e Error) Error() string {
 
 // StateMachine
 type StateMachine struct {
-	g         *C.GSM_StateMachine
-	smsc      C.GSM_SMSC
-	status    C.GSM_Error
-	connected bool
+	g      *C.GSM_StateMachine
+	smsc   C.GSM_SMSC
+	status C.GSM_Error
 
 	Timeout time.Duration // Default 15s
 }
@@ -84,7 +83,7 @@ func NewStateMachine(cf string) (*StateMachine, error) {
 }
 
 func (sm *StateMachine) free() {
-	if sm.connected {
+	if sm.IsConnected() {
 		sm.Disconnect()
 	}
 	C.GSM_FreeStateMachine(sm.g)
@@ -95,7 +94,6 @@ func (sm *StateMachine) Connect() error {
 	if e := C.GSM_InitConnection(sm.g, 1); e != C.ERR_NONE {
 		return Error(e)
 	}
-	sm.connected = true
 	C.setStatusCallback(sm.g, &sm.status)
 	sm.smsc.Location = 1
 	if e := C.GSM_GetSMSC(sm.g, &sm.smsc); e != C.ERR_NONE {
@@ -112,7 +110,6 @@ func (sm *StateMachine) Disconnect() error {
 	if e := C.GSM_TerminateConnection(sm.g); e != C.ERR_NONE {
 		return Error(e)
 	}
-	sm.connected = false
 	return nil
 }
 
