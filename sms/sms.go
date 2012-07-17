@@ -108,5 +108,5 @@ func Len(txt string) int {
 		}
 		n++
 	}
-	return m * m
+	return m * n
 }
