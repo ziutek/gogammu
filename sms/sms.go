@@ -110,3 +110,41 @@ func Len(txt string) int {
 	}
 	return m * n
 }
+
+func normalize(num string) string {
+	return strings.Map(
+		func(r rune) rune {
+			if r == '-' || r == ' ' {
+				return -1
+			}
+			return r
+		},
+		num,
+	)
+}
+
+// Parses list of numbers in form: 12341, 22-33-44; +48 52 211 222-33-11
+// If id != "" appends "=id" to any number.
+// If filter != nil it is used to filter normalized numbers.
+func ParseNumbers(phones, id string, filter func(string) bool) []string {
+	spl := strings.FieldsFunc(
+		phones,
+		func(r rune) bool {
+			return r == ',' || r == ';'
+		},
+	)
+	if id != "" {
+		id = "=" + id
+	}
+	ret := make([]string, 0, len(spl))
+	for _, num := range spl {
+		num := normalize(num)
+		if num != "" && (filter == nil || filter(num)) {
+			if id != "" {
+				num += id
+			}
+			ret = append(ret, num)
+		}
+	}
+	return ret
+}
