@@ -28,9 +28,9 @@ Client sends:
 	NAME VALUE. Implemented parameters:
 	    report - report required
 	    delete - delete message after sending (wait for reports, if required)
-	              - Empty line
-	Message body
-	.             - '.' as first and only character in line
+	                     - Empty line
+	Message body (UTF-8)
+	.                    - '.' as first and only character in line
 
 Server replies with 'OK' line or with error message and disconnects.
 

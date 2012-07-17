@@ -260,19 +260,3 @@ func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 	}
 	return
 }
-
-// Returns number of characters that will be used to send txt via SMS
-func Len(txt string) int {
-	var (
-		i int
-		r rune
-	)
-	m := 1
-	for i, r = range txt {
-		if r > 0x7F {
-			m = 4
-			break
-		}
-	}
-	return l * i
-}
