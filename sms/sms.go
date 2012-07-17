@@ -98,3 +98,24 @@ func writeln(w *bufio.Writer, s string) error {
 	}
 	return newLine(w)
 }
+
+// See gogammu.Len
+func Len(txt string) int {
+	return gogammu.Len(txt)
+}
+
+// Returns number of characters that will be used to send txt via SMS
+func Len(txt string) int {
+	var (
+		i int
+		r rune
+	)
+	m := 1
+	for i, r = range txt {
+		if r > 0x7F {
+			m = 4
+			break
+		}
+	}
+	return l * i
+}
