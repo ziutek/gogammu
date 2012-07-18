@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 )
@@ -111,14 +112,11 @@ func Len(txt string) int {
 	return m * n
 }
 
-func normalize(num string) string {
-	return strings.Map(
-		func(r rune) rune {
-			if r == '-' || r == ' ' {
-				return -1
-			}
-			return r
-		},
-		num,
-	)
+func AppendId(phones []string, id int) []string {
+	s := fmt.Sprintf("=%d", id)
+	r := make([]string, len(phones))
+	for i, p := range phones {
+		r[i] = p + s
+	}
+	return r
 }
