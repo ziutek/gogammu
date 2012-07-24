@@ -25,6 +25,7 @@ void setDebug() {
 */
 import "C"
 import (
+	"fmt"
 	"io"
 	"runtime"
 	"time"
@@ -32,10 +33,15 @@ import (
 )
 
 // Error
-type Error C.GSM_Error
+type Error struct {
+	descr string
+	g     C.GSM_Error
+}
 
 func (e Error) Error() string {
-	return C.GoString(C.GSM_ErrorString(C.GSM_Error(e)))
+	return fmt.Sprintf(
+		"[%s] %s", e.descr, C.GoString(C.GSM_ErrorString(C.GSM_Error(e.g))),
+	)
 }
 
 // StateMachine
@@ -56,11 +62,11 @@ func NewStateMachine(cf string) (*StateMachine, error) {
 		cs := C.CString(cf)
 		defer C.free(unsafe.Pointer(cs))
 		if e := C.GSM_FindGammuRC(&config, cs); e != C.ERR_NONE {
-			return nil, Error(e)
+			return nil, Error{"FindGammuRC", e}
 		}
 	} else {
 		if e := C.GSM_FindGammuRC(&config, nil); e != C.ERR_NONE {
-			return nil, Error(e)
+			return nil, Error{"FindGammuRC", e}
 		}
 	}
 	defer C.INI_Free(config)
@@ -73,7 +79,7 @@ func NewStateMachine(cf string) (*StateMachine, error) {
 
 	if e := C.GSM_ReadConfig(config, C.GSM_GetConfig(sm.g, 0), 0); e != C.ERR_NONE {
 		sm.free()
-		return nil, Error(e)
+		return nil, Error{"ReadConfig", e}
 	}
 	C.GSM_SetConfigNum(sm.g, 1)
 	sm.Timeout = 15 * time.Second
@@ -92,12 +98,12 @@ func (sm *StateMachine) free() {
 
 func (sm *StateMachine) Connect() error {
 	if e := C.GSM_InitConnection(sm.g, 1); e != C.ERR_NONE {
-		return Error(e)
+		return Error{"InitConnection", e}
 	}
 	C.setStatusCallback(sm.g, &sm.status)
 	sm.smsc.Location = 1
 	if e := C.GSM_GetSMSC(sm.g, &sm.smsc); e != C.ERR_NONE {
-		return Error(e)
+		return Error{"GetSMSC", e}
 	}
 	return nil
 }
@@ -108,21 +114,21 @@ func (sm *StateMachine) IsConnected() bool {
 
 func (sm *StateMachine) Disconnect() error {
 	if e := C.GSM_TerminateConnection(sm.g); e != C.ERR_NONE {
-		return Error(e)
+		return Error{"TerminateConnection", e}
 	}
 	return nil
 }
 
 func (sm *StateMachine) Reset() error {
 	if e := C.GSM_Reset(sm.g, 0); e != C.ERR_NONE {
-		return Error(e)
+		return Error{"Reset", e}
 	}
 	return nil
 }
 
 func (sm *StateMachine) HardReset() error {
 	if e := C.GSM_Reset(sm.g, 1); e != C.ERR_NONE {
-		return Error(e)
+		return Error{"Reset", e}
 	}
 	return nil
 }
@@ -144,7 +150,7 @@ func (sm *StateMachine) sendSMS(sms *C.GSM_SMSMessage, number string, report boo
 	// Send mepssage
 	sm.status = C.ERR_TIMEOUT
 	if e := C.GSM_SendSMS(sm.g, sms); e != C.ERR_NONE {
-		return Error(e)
+		return Error{"SendSMS", e}
 	}
 	// Wait for reply
 	t := time.Now()
@@ -159,7 +165,7 @@ func (sm *StateMachine) sendSMS(sms *C.GSM_SMSMessage, number string, report boo
 		}
 	}
 	if sm.status != C.ERR_NONE {
-		return Error(sm.status)
+		return Error{"ReadDevice", sm.status}
 	}
 	return nil
 }
@@ -194,7 +200,7 @@ func (sm *StateMachine) SendLongSMS(number, text string, report bool) error {
 	// Prepare multipart message
 	var msms C.GSM_MultiSMSMessage
 	if e := C.GSM_EncodeMultiPartSMS(nil, &smsInfo, &msms); e != C.ERR_NONE {
-		return Error(e)
+		return Error{"EncodeMultiPartSMS", e}
 	}
 	// Send message
 	for i := 0; i < int(msms.Number); i++ {
@@ -235,7 +241,7 @@ func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 		if e == C.ERR_EMPTY {
 			err = io.EOF
 		} else {
-			err = Error(e)
+			err = Error{"GetNextSMS", e}
 		}
 		return
 	}
@@ -254,7 +260,7 @@ func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 			sms.Report = true
 		}
 		if e := C.GSM_DeleteSMS(sm.g, &s); e != C.ERR_NONE {
-			err = Error(e)
+			err = Error{"DeleteSMS", e}
 			return
 		}
 	}
