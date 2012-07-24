@@ -259,6 +259,7 @@ func (sm *StateMachine) GetSMS() (sms SMS, err error) {
 		if s.PDU == C.SMS_Status_Report {
 			sms.Report = true
 		}
+		s.Folder = 0 // Flat
 		if e := C.GSM_DeleteSMS(sm.g, &s); e != C.ERR_NONE {
 			err = Error{"DeleteSMS", e}
 			return
