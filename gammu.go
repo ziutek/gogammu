@@ -212,6 +212,10 @@ func (sm *StateMachine) SendLongSMS(number, text string, report bool) error {
 }
 
 func encodeUTF8(in *C.uchar) string {
+	l := C.UnicodeLength(in)
+	if l == 0 {
+		return ""
+	}
 	out := make([]C.char, C.UnicodeLength(in)*2)
 	C.EncodeUTF8(&out[0], in)
 	return C.GoString(&out[0])
