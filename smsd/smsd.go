@@ -17,6 +17,8 @@ type SMSd struct {
 	end, newMsg chan event
 	wait        bool
 
+	numId func(string) uint
+
 	stmtOutboxGet, stmtRecipGet, stmtRecipSent, stmtInboxPut,
 	stmtRecipReport, stmtOutboxDel autorc.Stmt
 }
@@ -40,6 +42,11 @@ func NewSMSd(cfg *Config) (*SMSd, error) {
 	smsd.end = make(chan event)
 	smsd.newMsg = make(chan event)
 	return smsd, nil
+}
+
+// Use to provide function for convert a phone number to srcId i Inbox
+func (smsd *SMSd) SetNumId(f func(string) uint) {
+	smsd.numId = f
 }
 
 // Selects messages from Outbox that have any recipient without sent flag set
@@ -121,6 +128,7 @@ const inboxPut = `INSERT
 SET
 	time=?,
 	number=?,
+	srcId=?,
 	body=?
 `
 
@@ -167,7 +175,13 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 			}
 		} else {
 			// Save a message in Inbox
-			_, _, err = smsd.stmtInboxPut.Exec(sms.Time, sms.Number, sms.Body)
+			var srcId uint
+			if smsd.numId != nil {
+				srcId = smsd.numId(sms.Number)
+			}
+			_, _, err = smsd.stmtInboxPut.Exec(
+				sms.Time, sms.Number, srcId, sms.Body,
+			)
 			if err != nil {
 				log.Printf(
 					"Can't insert message from %s into Inbox: %s",
