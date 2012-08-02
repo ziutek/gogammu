@@ -14,6 +14,7 @@ type Config struct {
 	Listen  []string
 	Source  []string
 	LogFile string
+	NumId   string
 }
 
 func syntaxError(ln int) error {
@@ -78,6 +79,8 @@ func (c *Config) Read(r io.Reader) error {
 			}
 		case "LogFile":
 			c.LogFile = l
+		case "NumId":
+			c.NumId = l
 		default:
 			syntaxError(i)
 		}

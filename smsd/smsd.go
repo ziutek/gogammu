@@ -17,10 +17,10 @@ type SMSd struct {
 	end, newMsg chan event
 	wait        bool
 
-	numId func(string) uint
+	sqlNumId string
 
 	stmtOutboxGet, stmtRecipGet, stmtRecipSent, stmtInboxPut,
-	stmtRecipReport, stmtOutboxDel autorc.Stmt
+	stmtRecipReport, stmtOutboxDel, stmtNumId autorc.Stmt
 }
 
 func NewSMSd(cfg *Config) (*SMSd, error) {
@@ -39,14 +39,10 @@ func NewSMSd(cfg *Config) (*SMSd, error) {
 	smsd.db.Raw.Register(createRecipients)
 	smsd.db.Raw.Register(createInbox)
 	smsd.db.Raw.Register(setLocPrefix)
+	smsd.sqlNumId = cfg.NumId
 	smsd.end = make(chan event)
 	smsd.newMsg = make(chan event)
 	return smsd, nil
-}
-
-// Use to provide function for convert a phone number to srcId i Inbox
-func (smsd *SMSd) SetNumId(f func(string) uint) {
-	smsd.numId = f
 }
 
 // Selects messages from Outbox that have any recipient without sent flag set
@@ -149,6 +145,11 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 	if !prepareOnce(smsd.db, &smsd.stmtRecipReport, recipReport) {
 		return
 	}
+	if smsd.sqlNumId != "" {
+		if !prepareOnce(smsd.db, &smsd.stmtNumId, smsd.sqlNumId) {
+			return
+		}
+	}
 	for {
 		sms, err := smsd.sm.GetSMS()
 		if err != nil {
@@ -176,8 +177,22 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 		} else {
 			// Save a message in Inbox
 			var srcId uint
-			if smsd.numId != nil {
-				srcId = smsd.numId(sms.Number)
+			if smsd.stmtNumId.Raw != nil {
+				ids, _, err := smsd.stmtNumId.Exec(sms.Number)
+				if err != nil {
+					log.Printf(
+						"Can't get srcId for number %s: %s",
+						sms.Number, err,
+					)
+					return
+				}
+				if len(ids) > 0 {
+					srcId, err = ids[0].UintErr(0)
+					if err != nil {
+						log.Printf("Bad srcId '%s': %s", ids[0][0], err)
+						return
+					}
+				}
 			}
 			_, _, err = smsd.stmtInboxPut.Exec(
 				sms.Time, sms.Number, srcId, sms.Body,
