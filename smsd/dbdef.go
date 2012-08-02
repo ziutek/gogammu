@@ -34,6 +34,8 @@ const createInbox = `CREATE TABLE IF NOT EXISTS ` + inboxTable + ` (
 	id     int unsigned NOT NULL AUTO_INCREMENT,
 	time   datetime NOT NULL,
 	number varchar(16) NOT NULL,
+	srcId  int unsigned NOT NULL,
 	body   text NOT NULL,
-	PRIMARY KEY (id)
+	PRIMARY KEY (id),
+	KEY srcId (srcId)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8`
