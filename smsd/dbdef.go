@@ -35,6 +35,7 @@ const createInbox = `CREATE TABLE IF NOT EXISTS ` + inboxTable + ` (
 	time   datetime NOT NULL,
 	number varchar(16) NOT NULL,
 	srcId  int unsigned NOT NULL,
+	rd     boolean NOT NULL,
 	body   text NOT NULL,
 	PRIMARY KEY (id),
 	KEY srcId (srcId)
