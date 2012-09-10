@@ -1,50 +1,79 @@
 package main
 
 import (
+	"github.com/ziutek/mymysql/autorc"
+	_ "github.com/ziutek/mymysql/native"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"unicode"
 )
 
 var (
-	cfg  Config
-	ins  []*Input
-	smsd *SMSd
+	ins         []*Input
+	logFileName string
+	smsd        *SMSd
 )
+
+func parseList(l string) []string {
+	var a []string
+	for {
+		n := strings.IndexFunc(l, unicode.IsSpace)
+		if n == -1 {
+			a = append(a, l)
+			break
+		}
+		a = append(a, l[:n])
+		l = strings.TrimLeftFunc(l[n:], unicode.IsSpace)
+	}
+	return a
+}
 
 func main() {
 	if len(os.Args) != 2 {
 		log.Printf("Usage: %s CONFIG_FILE\n", os.Args[0])
 		os.Exit(1)
 	}
-	cf, err := os.Open(os.Args[1])
-	if err != nil {
-		log.Println("Can't open configuration file:", err)
-		os.Exit(1)
-	}
-	err = cfg.Read(cf)
-	if err != nil {
-		log.Println("Can't read configuration file:", err)
-		os.Exit(1)
-	}
 
-	setupLogging()
-
-	smsd, err = NewSMSd(&cfg)
+	db, cfg, err := autorc.NewFromCF(os.Args[1])
 	if err != nil {
 		log.Println("Error:", err)
 		os.Exit(1)
 	}
 
-	ins = make([]*Input, len(cfg.Listen))
-	for i, a := range cfg.Listen {
+	c, ok := cfg["Listen"]
+	if !ok {
+		log.Println("There is no 'Listen' option in config file")
+		os.Exit(1)
+	}
+	listen := parseList(c)
+	c, ok = cfg["Source"]
+	if !ok {
+		log.Println("There is no 'Source' option in config file")
+		os.Exit(1)
+	}
+	source := parseList(c)
+
+	logFileName, _ = cfg["LogFile"]
+	numId, _ := cfg["NumId"]
+
+	smsd, err = NewSMSd(db, numId)
+	if err != nil {
+		log.Println("Error:", err)
+		os.Exit(1)
+	}
+
+	setupLogging()
+
+	ins = make([]*Input, len(listen))
+	for i, a := range listen {
 		proto := "tcp"
 		if strings.IndexRune(a, ':') == -1 {
 			proto = "unix"
 		}
-		ins[i] = NewInput(smsd, proto, a, &cfg)
+		ins[i] = NewInput(smsd, proto, a, db.Clone(), source)
 	}
 
 	smsd.Start()
@@ -72,11 +101,11 @@ func main() {
 var logFile *os.File
 
 func setupLogging() {
-	if cfg.LogFile == "" {
+	if logFileName == "" {
 		return
 	}
 	newFile, err := os.OpenFile(
-		cfg.LogFile,
+		logFileName,
 		os.O_WRONLY|os.O_APPEND|os.O_CREATE,
 		0620,
 	)
@@ -87,7 +116,7 @@ func setupLogging() {
 	prevFile := logFile
 	logFile = newFile
 	log.SetOutput(logFile)
-	log.Println("Start logging to file:", cfg.LogFile)
+	log.Println("Start logging to file:", logFileName)
 	if prevFile != nil {
 		err = prevFile.Close()
 		if err != nil {

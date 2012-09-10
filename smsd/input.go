@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"github.com/ziutek/mymysql/autorc"
-	_ "github.com/ziutek/mymysql/native"
 	"io"
 	"log"
 	"net"
@@ -37,19 +36,16 @@ type Input struct {
 	stop                           bool
 }
 
-func NewInput(smsd *SMSd, proto, addr string, cfg *Config) *Input {
+func NewInput(smsd *SMSd, proto, addr string, db *autorc.Conn, src []string) *Input {
 	in := new(Input)
 	in.smsd = smsd
-	in.db = autorc.New(
-		cfg.Db.Proto, cfg.Db.Saddr, cfg.Db.Daddr,
-		cfg.Db.User, cfg.Db.Pass, cfg.Db.Name,
-	)
+	in.db = db
 	in.db.Raw.Register(setNames)
 	in.db.Raw.Register(createOutbox)
 	in.db.Raw.Register(createRecipients)
 	in.proto = proto
 	in.addr = addr
-	in.knownSrc = cfg.Source
+	in.knownSrc = src
 	return in
 }
 

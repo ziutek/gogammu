@@ -23,23 +23,20 @@ type SMSd struct {
 	stmtRecipReport, stmtOutboxDel, stmtNumId autorc.Stmt
 }
 
-func NewSMSd(cfg *Config) (*SMSd, error) {
+func NewSMSd(db *autorc.Conn, numId string) (*SMSd, error) {
 	var err error
 	smsd := new(SMSd)
 	smsd.sm, err = gammu.NewStateMachine("")
 	if err != nil {
 		return nil, err
 	}
-	smsd.db = autorc.New(
-		cfg.Db.Proto, cfg.Db.Saddr, cfg.Db.Daddr,
-		cfg.Db.User, cfg.Db.Pass, cfg.Db.Name,
-	)
+	smsd.db = db
 	smsd.db.Raw.Register(setNames)
 	smsd.db.Raw.Register(createOutbox)
 	smsd.db.Raw.Register(createRecipients)
 	smsd.db.Raw.Register(createInbox)
 	smsd.db.Raw.Register(setLocPrefix)
-	smsd.sqlNumId = cfg.NumId
+	smsd.sqlNumId = numId
 	smsd.end = make(chan event)
 	smsd.newMsg = make(chan event)
 	return smsd, nil
