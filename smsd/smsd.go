@@ -17,26 +17,34 @@ type SMSd struct {
 	end, newMsg chan event
 	wait        bool
 
-	sqlNumId string
+	sqlNumToId string
 
 	stmtOutboxGet, stmtRecipGet, stmtRecipSent, stmtInboxPut,
-	stmtRecipReport, stmtOutboxDel, stmtNumId autorc.Stmt
+	stmtRecipReport, stmtOutboxDel, stmtNumToId autorc.Stmt
+
+	filter *Filter
 }
 
-func NewSMSd(db *autorc.Conn, numId string) (*SMSd, error) {
+func NewSMSd(db *autorc.Conn, numId, filter string) (*SMSd, error) {
 	var err error
 	smsd := new(SMSd)
 	smsd.sm, err = gammu.NewStateMachine("")
 	if err != nil {
 		return nil, err
 	}
+	if filter != "" {
+		smsd.filter, err = NewFilter(filter)
+		if err != nil {
+			return nil, err
+		}
+	}
 	smsd.db = db
-	smsd.db.Raw.Register(setNames)
-	smsd.db.Raw.Register(createOutbox)
-	smsd.db.Raw.Register(createRecipients)
-	smsd.db.Raw.Register(createInbox)
-	smsd.db.Raw.Register(setLocPrefix)
-	smsd.sqlNumId = numId
+	smsd.db.Register(setNames)
+	smsd.db.Register(createOutbox)
+	smsd.db.Register(createRecipients)
+	smsd.db.Register(createInbox)
+	smsd.db.Register(setLocPrefix)
+	smsd.sqlNumToId = numId
 	smsd.end = make(chan event)
 	smsd.newMsg = make(chan event)
 	return smsd, nil
@@ -135,6 +143,13 @@ ORDER BY
 	abs(timediff(?, sent))
 LIMIT 1`
 
+type Msg struct {
+	Time   time.Time
+	Number string
+	SrcId  uint
+	Body   string
+}
+
 func (smsd *SMSd) recvMessages() (gammuErr bool) {
 	if !prepareOnce(smsd.db, &smsd.stmtInboxPut, inboxPut) {
 		return
@@ -142,11 +157,15 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 	if !prepareOnce(smsd.db, &smsd.stmtRecipReport, recipReport) {
 		return
 	}
-	if smsd.sqlNumId != "" {
-		if !prepareOnce(smsd.db, &smsd.stmtNumId, smsd.sqlNumId) {
+	if smsd.sqlNumToId != "" {
+		if !prepareOnce(smsd.db, &smsd.stmtNumToId, smsd.sqlNumToId) {
 			return
 		}
 	}
+
+	var msg Msg
+	smsd.stmtInboxPut.Bind(&msg)
+
 	for {
 		sms, err := smsd.sm.GetSMS()
 		if err != nil {
@@ -173,9 +192,13 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 			}
 		} else {
 			// Save a message in Inbox
-			var srcId uint
-			if smsd.stmtNumId.Raw != nil {
-				ids, _, err := smsd.stmtNumId.Exec(sms.Number)
+			msg.Time = sms.Time
+			msg.Number = sms.Number
+			msg.SrcId = 0
+			msg.Body = sms.Body
+			//log.Printf("Odebrano: %+v", msg)
+			if smsd.stmtNumToId.Raw != nil {
+				id, _, err := smsd.stmtNumToId.ExecFirst(msg.Number)
 				if err != nil {
 					log.Printf(
 						"Can't get srcId for number %s: %s",
@@ -183,17 +206,15 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 					)
 					return
 				}
-				if len(ids) > 0 {
-					srcId, err = ids[0].UintErr(0)
+				if id != nil {
+					msg.SrcId, err = id.UintErr(0)
 					if err != nil {
-						log.Printf("Bad srcId '%s': %s", ids[0][0], err)
+						log.Printf("Bad srcId '%v': %s", id[0], err)
 						return
 					}
 				}
 			}
-			_, _, err = smsd.stmtInboxPut.Exec(
-				sms.Time, sms.Number, srcId, sms.Body,
-			)
+			_, _, err = smsd.stmtInboxPut.Exec() // using msg
 			if err != nil {
 				log.Printf(
 					"Can't insert message from %s into Inbox: %s",

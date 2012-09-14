@@ -58,8 +58,9 @@ func main() {
 
 	logFileName, _ = cfg["LogFile"]
 	numId, _ := cfg["NumId"]
+	filter, _ := cfg["Filter"]
 
-	smsd, err = NewSMSd(db, numId)
+	smsd, err = NewSMSd(db, numId, filter)
 	if err != nil {
 		log.Println("Error:", err)
 		os.Exit(1)

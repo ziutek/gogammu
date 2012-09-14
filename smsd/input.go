@@ -40,9 +40,9 @@ func NewInput(smsd *SMSd, proto, addr string, db *autorc.Conn, src []string) *In
 	in := new(Input)
 	in.smsd = smsd
 	in.db = db
-	in.db.Raw.Register(setNames)
-	in.db.Raw.Register(createOutbox)
-	in.db.Raw.Register(createRecipients)
+	in.db.Register(setNames)
+	in.db.Register(createOutbox)
+	in.db.Register(createRecipients)
 	in.proto = proto
 	in.addr = addr
 	in.knownSrc = src
