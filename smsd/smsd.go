@@ -214,6 +214,21 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 					}
 				}
 			}
+			if f := smsd.filter; f != nil {
+				retry := 1
+			tryAgain:
+				accept, err := f.Filter(&msg)
+				if err != nil {
+					if retry > 0 {
+						retry--
+						goto tryAgain
+					}
+					log.Printf("Message filter %s error: %s", f.Path(), err)
+				} else if !accept {
+					// Drop this message
+					continue
+				}
+			}
 			_, _, err = smsd.stmtInboxPut.Exec() // using msg
 			if err != nil {
 				log.Printf(

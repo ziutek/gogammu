@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
@@ -15,9 +16,13 @@ type Filter struct {
 
 func NewFilter(path string) (*Filter, error) {
 	if len(path) == 0 || path[0] != '|' {
-		return nil, fmt.Errorf("Bad filter: '%s'", path)
+		return nil, fmt.Errorf("Bad filter path: '%s'", path)
 	}
-	return &Filter{path: path}, nil
+	return &Filter{path: path[1:]}, nil
+}
+
+func (f *Filter) Path() string {
+	return f.path
 }
 
 func (f *Filter) Filter(msg *Msg) (bool, error) {
@@ -31,6 +36,7 @@ func (f *Filter) Filter(msg *Msg) (bool, error) {
 		if err != nil {
 			return true, err
 		}
+		f.cmd.Stderr = os.Stderr
 		err = f.cmd.Start()
 		if err != nil {
 			f.cmd = nil
@@ -46,19 +52,34 @@ func (f *Filter) Filter(msg *Msg) (bool, error) {
 		f.cmd = nil
 		return true, err
 	}
-	var v map[string]interface{}
-	err = f.in.Decode(&v)
+	var mm map[string]interface{}
+	err = f.in.Decode(&mm)
 	if err != nil {
 		f.cmd.Wait()
 		f.cmd = nil
 		return true, err
 	}
-	if v == nil {
+	if mm == nil {
 		return false, nil
 	}
-	if len(v) == 0 {
+	if len(mm) == 0 {
+		// No modifications
 		return true, nil
 	}
-
+	if v, ok := mm["Number"]; ok {
+		if number, ok := v.(string); ok {
+			msg.Number = number
+		}
+	}
+	if v, ok := mm["SrcId"]; ok {
+		if srcId, ok := v.(float64); ok && srcId > 0 {
+			msg.SrcId = uint(srcId)
+		}
+	}
+	if v, ok := mm["Body"]; ok {
+		if body, ok := v.(string); ok {
+			msg.Body = body
+		}
+	}
 	return true, nil
 }
