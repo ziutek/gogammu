@@ -46,7 +46,7 @@ func NewSMSd(db *autorc.Conn, numId, filter string) (*SMSd, error) {
 	smsd.db.Register(setLocPrefix)
 	smsd.sqlNumToId = numId
 	smsd.end = make(chan event)
-	smsd.newMsg = make(chan event)
+	smsd.newMsg = make(chan event, 1)
 	return smsd, nil
 }
 
@@ -291,7 +291,7 @@ func (smsd *SMSd) loop() {
 			return
 		case <-smsd.newMsg:
 			send = true
-		case <-time.After(17 * time.Second):
+		case <-time.After(7 * time.Second):
 			// send and del two times less frequently than recv
 			send = !send
 		}
