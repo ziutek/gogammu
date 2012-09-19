@@ -96,6 +96,12 @@ retry:
 			msg.SrcId = uint(srcId)
 		}
 	}
+	if v, ok := mm["Rd"]; ok {
+		if body, ok := v.(bool); ok {
+			msg.Rd = body
+		}
+	}
+
 	if v, ok := mm["Body"]; ok {
 		if body, ok := v.(string); ok {
 			msg.Body = body

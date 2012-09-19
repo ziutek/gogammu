@@ -130,6 +130,7 @@ SET
 	time=?,
 	number=?,
 	srcId=?,
+	rd=?,
 	body=?
 `
 
@@ -147,6 +148,7 @@ type Msg struct {
 	Time   time.Time
 	Number string
 	SrcId  uint
+	Rd     bool
 	Body   string
 }
 
