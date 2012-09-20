@@ -148,8 +148,8 @@ type Msg struct {
 	Time   time.Time
 	Number string
 	SrcId  uint
-	Rd     bool
 	Body   string
+	Note   string
 }
 
 func (smsd *SMSd) recvMessages() (gammuErr bool) {
@@ -293,7 +293,7 @@ func (smsd *SMSd) loop() {
 			return
 		case <-smsd.newMsg:
 			send = true
-		case <-time.After(7 * time.Second):
+		case <-time.After(11 * time.Second): // if 7s my phone works bad
 			// send and del two times less frequently than recv
 			send = !send
 		}
