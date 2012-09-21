@@ -130,8 +130,8 @@ SET
 	time=?,
 	number=?,
 	srcId=?,
-	rd=?,
 	body=?
+	note=?,
 `
 
 const recipReport = `UPDATE
