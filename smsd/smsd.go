@@ -293,7 +293,7 @@ func (smsd *SMSd) loop() {
 			return
 		case <-smsd.newMsg:
 			send = true
-		case <-time.After(11 * time.Second): // if 7s my phone works bad
+		case <-time.After(15 * time.Second): // if 11s my phone works bad
 			// send and del two times less frequently than recv
 			send = !send
 		}
