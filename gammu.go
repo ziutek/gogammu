@@ -44,6 +44,16 @@ func (e Error) Error() string {
 	)
 }
 
+type EncodeError struct {
+	g C.GSM_Error
+}
+
+func (e EncodeError) Error() string {
+	return fmt.Sprintf(
+		"[EncodeMultiPartSMS] %s", C.GoString(C.GSM_ErrorString(C.GSM_Error(e.g))),
+	)
+}
+
 // StateMachine
 type StateMachine struct {
 	g      *C.GSM_StateMachine
@@ -200,7 +210,7 @@ func (sm *StateMachine) SendLongSMS(number, text string, report bool) error {
 	// Prepare multipart message
 	var msms C.GSM_MultiSMSMessage
 	if e := C.GSM_EncodeMultiPartSMS(nil, &smsInfo, &msms); e != C.ERR_NONE {
-		return Error{"EncodeMultiPartSMS", e}
+		return EncodeError{e}
 	}
 	// Send message
 	for i := 0; i < int(msms.Number); i++ {
