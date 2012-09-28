@@ -6,7 +6,6 @@ import (
 	"github.com/ziutek/mymysql/autorc"
 	"log"
 	"os"
-	"time"
 	"unicode"
 )
 
@@ -34,15 +33,6 @@ func prepareOnce(db *autorc.Conn, stmt *autorc.Stmt, sql string) bool {
 		os.Exit(1)
 	}
 	return false
-}
-
-func isGammuError(e error) bool {
-	if e == nil {
-		return false
-	}
-	log.Println("Error while communicating with the GSM device:", e)
-	time.Sleep(60 * time.Second)
-	return true
 }
 
 func checkNumber(num string) bool {

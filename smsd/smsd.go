@@ -6,6 +6,7 @@ import (
 	_ "github.com/ziutek/mymysql/native"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -16,16 +17,18 @@ type SMSd struct {
 
 	end, newMsg chan event
 	wait        bool
+	gammuErrors uint
 
 	sqlNumToId string
 
 	stmtOutboxGet, stmtRecipGet, stmtRecipSent, stmtInboxPut,
 	stmtRecipReport, stmtOutboxDel, stmtNumToId autorc.Stmt
 
-	filter *Filter
+	filter  *Filter
+	pullInt time.Duration
 }
 
-func NewSMSd(db *autorc.Conn, numId, filter string) (*SMSd, error) {
+func NewSMSd(db *autorc.Conn, numId, filter string, pullInt time.Duration) (*SMSd, error) {
 	var err error
 	smsd := new(SMSd)
 	smsd.sm, err = gammu.NewStateMachine("")
@@ -71,7 +74,7 @@ WHERE
 const recipientsSent = "UPDATE " + recipientsTable + " SET sent=? WHERE id=?"
 
 // Send messages from Outbox
-func (smsd *SMSd) sendMessages() (gammuErr bool) {
+func (smsd *SMSd) sendMessages() {
 	if !prepareOnce(smsd.db, &smsd.stmtOutboxGet, outboxGet) {
 		return
 	}
@@ -107,9 +110,15 @@ func (smsd *SMSd) sendMessages() (gammuErr bool) {
 			if !checkNumber(num) {
 				continue
 			}
-			if isGammuError(smsd.sm.SendLongSMS(num, body, report)) {
-				// Phone error or bad values
-				gammuErr = true
+			err = smsd.sm.SendLongSMS(num, body, report)
+			if err != nil {
+				if _, ok := err.(gammu.EncodeError); ok {
+					log.Printf("Can't encode message to %s: %s", num, err)
+					continue
+				}
+				smsd.gammuErrors++
+				log.Printf("Can't send message to %s: %s", num, err)
+				return
 			}
 			_, _, err = smsd.stmtRecipSent.Exec(time.Now(), pid)
 			if err != nil {
@@ -152,7 +161,7 @@ type Msg struct {
 	Note   string
 }
 
-func (smsd *SMSd) recvMessages() (gammuErr bool) {
+func (smsd *SMSd) recvMessages() {
 	if !prepareOnce(smsd.db, &smsd.stmtInboxPut, inboxPut) {
 		return
 	}
@@ -174,8 +183,9 @@ func (smsd *SMSd) recvMessages() (gammuErr bool) {
 			if err == io.EOF {
 				break
 			}
+			smsd.gammuErrors++
 			log.Printf("Can't get message from phone: %s", err)
-			return true
+			return
 		}
 		if sms.Report {
 			// Find a message and sender in Outbox and mark it
@@ -264,37 +274,58 @@ func (smsd *SMSd) delMessages() {
 	}
 }
 
-func (smsd *SMSd) sendRecvDel(send bool) {
-	var gammuErr bool
+func (smsd *SMSd) sendRecvDel(send bool) (end bool) {
 	if !smsd.sm.IsConnected() {
-		if isGammuError(smsd.sm.Connect()) {
+		if smsd.gammuErrors > 2 {
+			log.Println("Too many errors - terminating")
+			os.Exit(1)
+		}
+		err := smsd.sm.Connect()
+		if err != nil {
+			smsd.gammuErrors++
+			sleep := 60 * time.Second
+			log.Println("Can't connect - waiting", sleep)
+			select {
+			case <-smsd.end:
+				return true
+			case <-time.After(sleep):
+			}
 			return
 		}
+		smsd.gammuErrors = 0
 	}
 	if send {
-		gammuErr = smsd.sendMessages()
+		smsd.sendMessages()
 	}
-	gammuErr = smsd.recvMessages() || gammuErr
+	smsd.recvMessages()
 	if send {
 		smsd.delMessages()
 	}
-	if gammuErr && smsd.sm.IsConnected() {
-		smsd.sm.Disconnect()
+	if smsd.gammuErrors > 2 {
+		log.Println("Too many errors - disconnecting")
+		if smsd.sm.IsConnected() {
+			smsd.sm.Disconnect()
+		}
+		smsd.gammuErrors = 0
 	}
+	return
 }
 
 func (smsd *SMSd) loop() {
 	send := true
 	for {
-		smsd.sendRecvDel(send)
+		if smsd.sendRecvDel(send) {
+			return
+		}
 		// Wait for some event or timeout
 		select {
 		case <-smsd.end:
 			return
 		case <-smsd.newMsg:
 			send = true
-		case <-time.After(15 * time.Second): // if 11s my phone works bad
-			// send and del two times less frequently than recv
+		case <-time.After(smsd.pullInt):
+			// if there is no newMsg signal, send and del two times less
+			// frequently than recv
 			send = !send
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 )
 
@@ -56,11 +57,21 @@ func main() {
 	}
 	source := parseList(c)
 
+	pullInt := 17 * time.Second // if 15s my phone works bad
+	c, _ = cfg["PullInt"]
+	if c != "" {
+		pullInt, err = time.ParseDuration(c)
+		if err != nil {
+			log.Printf("Wrong value for 'PullInt' option: '%s'", c)
+			os.Exit(1)
+		}
+	}
+
 	logFileName, _ = cfg["LogFile"]
 	numId, _ := cfg["NumId"]
 	filter, _ := cfg["Filter"]
 
-	smsd, err = NewSMSd(db, numId, filter)
+	smsd, err = NewSMSd(db, numId, filter, pullInt)
 	if err != nil {
 		log.Println("Error:", err)
 		os.Exit(1)
