@@ -185,30 +185,34 @@ func (in *Input) loop() {
 	}
 }
 
-func (in *Input) Start() error {
+func (in *Input) Start() {
 	var err error
 	if in.proto == "unix" {
 		os.Remove(in.addr)
 	}
 	in.ln, err = net.Listen(in.proto, in.addr)
 	if err != nil {
-		return err
+		log.Printf("Can't listen on %s: %s", in.addr, err)
+		os.Exit(1)
 	}
 	if in.proto == "unix" {
 		err = os.Chmod(in.addr, 0666)
 		if err != nil {
-			return err
+			log.Printf("Can't chmod on unix socket %s: %s", in.addr, err)
+			os.Exit(1)
 		}
 	}
 	log.Println("Listen on:", in.proto, in.addr)
 	in.stop = false
 	go in.loop()
-	return nil
+	return
 }
 
-func (in *Input) Stop() error {
+func (in *Input) Stop() {
 	in.stop = true
-	return in.ln.Close()
+	if err := in.ln.Close(); err != nil {
+		log.Println("Can't close listen socket:", err)
+	}
 }
 
 func (in *Input) String() string {

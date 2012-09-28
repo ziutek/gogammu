@@ -44,6 +44,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	logFileName, _ = cfg["LogFile"]
+	setupLogging()
+
 	c, ok := cfg["Listen"]
 	if !ok {
 		log.Println("There is no 'Listen' option in config file")
@@ -67,17 +70,10 @@ func main() {
 		}
 	}
 
-	logFileName, _ = cfg["LogFile"]
 	numId, _ := cfg["NumId"]
 	filter, _ := cfg["Filter"]
 
-	smsd, err = NewSMSd(db, numId, filter, pullInt)
-	if err != nil {
-		log.Println("Error:", err)
-		os.Exit(1)
-	}
-
-	setupLogging()
+	smsd = NewSMSd(db, numId, filter, pullInt)
 
 	ins = make([]*Input, len(listen))
 	for i, a := range listen {
@@ -92,10 +88,7 @@ func main() {
 	defer smsd.Stop()
 
 	for _, in := range ins {
-		if err := in.Start(); err != nil {
-			log.Print("Can't start input thread: ", err)
-			return
-		}
+		in.Start()
 		defer in.Stop()
 	}
 

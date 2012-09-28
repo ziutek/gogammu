@@ -17,7 +17,8 @@ type SMSd struct {
 
 	end, newMsg chan event
 	wait        bool
-	gammuErrors uint
+
+	gammuErrors, gammuConnErrors uint
 
 	sqlNumToId string
 
@@ -28,19 +29,28 @@ type SMSd struct {
 	pullInt time.Duration
 }
 
-func NewSMSd(db *autorc.Conn, numId, filter string, pullInt time.Duration) (*SMSd, error) {
+func NewSMSd(db *autorc.Conn, numId, filter string, pullInt time.Duration) *SMSd {
 	var err error
+
 	smsd := new(SMSd)
 	smsd.sm, err = gammu.NewStateMachine("")
 	if err != nil {
-		return nil, err
+		log.Println("Can't create gammu state machine:", err)
+		os.Exit(1)
 	}
+
+	smsd.pullInt = pullInt
+	log.Println("Pull interval:", pullInt)
+
 	if filter != "" {
 		smsd.filter, err = NewFilter(filter)
 		if err != nil {
-			return nil, err
+			log.Println("Can't setup a filter:", err)
+			os.Exit(1)
 		}
 	}
+	log.Println("Filter:", filter)
+
 	smsd.db = db
 	smsd.db.Register(setNames)
 	smsd.db.Register(createOutbox)
@@ -50,7 +60,7 @@ func NewSMSd(db *autorc.Conn, numId, filter string, pullInt time.Duration) (*SMS
 	smsd.sqlNumToId = numId
 	smsd.end = make(chan event)
 	smsd.newMsg = make(chan event, 1)
-	return smsd, nil
+	return smsd
 }
 
 // Selects messages from Outbox that have any recipient without sent flag set
@@ -74,7 +84,7 @@ WHERE
 const recipientsSent = "UPDATE " + recipientsTable + " SET sent=? WHERE id=?"
 
 // Send messages from Outbox
-func (smsd *SMSd) sendMessages() {
+func (smsd *SMSd) sendMessages() (gammuError bool) {
 	if !prepareOnce(smsd.db, &smsd.stmtOutboxGet, outboxGet) {
 		return
 	}
@@ -118,7 +128,7 @@ func (smsd *SMSd) sendMessages() {
 				}
 				smsd.gammuErrors++
 				log.Printf("Can't send message to %s: %s", num, err)
-				return
+				return true
 			}
 			_, _, err = smsd.stmtRecipSent.Exec(time.Now(), pid)
 			if err != nil {
@@ -161,7 +171,7 @@ type Msg struct {
 	Note   string
 }
 
-func (smsd *SMSd) recvMessages() {
+func (smsd *SMSd) recvMessages() (gammuError bool) {
 	if !prepareOnce(smsd.db, &smsd.stmtInboxPut, inboxPut) {
 		return
 	}
@@ -185,7 +195,7 @@ func (smsd *SMSd) recvMessages() {
 			}
 			smsd.gammuErrors++
 			log.Printf("Can't get message from phone: %s", err)
-			return
+			return true
 		}
 		if sms.Report {
 			// Find a message and sender in Outbox and mark it
@@ -275,16 +285,21 @@ func (smsd *SMSd) delMessages() {
 }
 
 func (smsd *SMSd) sendRecvDel(send bool) (end bool) {
+	if smsd.gammuErrors > 2 && smsd.sm.IsConnected() {
+		log.Println("Too many errors - disconnecting")
+		smsd.sm.Disconnect()
+	}
 	if !smsd.sm.IsConnected() {
-		if smsd.gammuErrors > 2 {
-			log.Println("Too many errors - terminating")
+		if smsd.gammuConnErrors > 2 {
+			log.Println("Too many connection errors - terminating")
 			os.Exit(1)
 		}
 		err := smsd.sm.Connect()
 		if err != nil {
-			smsd.gammuErrors++
+			smsd.gammuConnErrors++
 			sleep := 60 * time.Second
-			log.Println("Can't connect - waiting", sleep)
+			log.Println("Can't connect:", err)
+			log.Println("Waiting", sleep)
 			select {
 			case <-smsd.end:
 				return true
@@ -293,20 +308,19 @@ func (smsd *SMSd) sendRecvDel(send bool) (end bool) {
 			return
 		}
 		smsd.gammuErrors = 0
+		smsd.gammuConnErrors = 0
 	}
+
 	if send {
-		smsd.sendMessages()
+		if smsd.sendMessages() {
+			return
+		}
 	}
-	smsd.recvMessages()
+	if smsd.recvMessages() {
+		return
+	}
 	if send {
 		smsd.delMessages()
-	}
-	if smsd.gammuErrors > 2 {
-		log.Println("Too many errors - disconnecting")
-		if smsd.sm.IsConnected() {
-			smsd.sm.Disconnect()
-		}
-		smsd.gammuErrors = 0
 	}
 	return
 }
