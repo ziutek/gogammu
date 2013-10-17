@@ -31,6 +31,8 @@ func (s *Sender) Send(txt string, recipients ...string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
+
 	w := bufio.NewWriter(c)
 
 	if err = writeln(w, s.Id); err != nil {
@@ -82,10 +84,9 @@ func (s *Sender) Send(txt string, recipients ...string) error {
 	}
 	buf = bytes.TrimSpace(buf)
 	if !bytes.Equal(buf, []byte{'O', 'K'}) {
-		c.Close()
 		return errors.New(string(buf))
 	}
-	return c.Close()
+	return nil
 }
 
 func newLine(w *bufio.Writer) error {
