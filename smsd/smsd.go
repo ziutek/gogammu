@@ -261,13 +261,13 @@ func (smsd *SMSd) recvMessages() (gammuError bool) {
 const outboxDel = `DELETE FROM
 	o
 USING
-	SMSd_Outbox o
+	` + outboxTable + ` o
 WHERE
 	o.del && !EXISTS(
 		SELECT
 			* 
 		FROM
-			SMSd_Recipients r
+			` + recipientsTable + ` r
 		WHERE
 			r.msgId = o.id && (!r.sent || o.report && !r.report) 
 	)
