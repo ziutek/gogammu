@@ -1,5 +1,5 @@
 *gogammu* is binding for SMS related functions of *libGammu*
-([documentation](http://gopkgdoc.appspot.com/pkg/github.com/ziutek/gogammu)).
+([documentation](https://godoc.org/github.com/ziutek/gogammu)).
 
 *gogammu/smsd* is simple, MySQL based, SMS daemon, written entirely in Go (it
 doesn't depend on Gammu SMSd).
@@ -16,7 +16,7 @@ For run it in background use *runit* or *daemontools*.
 
 *gogammu/sms* simple library that implements *smsd protocol*. Use it for sending
 messages via *smsd*
-([documentation](http://gopkgdoc.appspot.com/pkg/github.com/ziutek/gogammu/sms)).
+([documentation](https://godoc.org/github.com/ziutek/gogammu/sms)).
 
 *Protocol description*
 
