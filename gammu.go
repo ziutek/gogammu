@@ -2,6 +2,7 @@
 package gammu
 
 /*
+#include <stdlib.h>
 #include <gammu.h>
 
 void sendCallback(GSM_StateMachine *sm, int status, int msgRef, void *data) {
@@ -204,9 +205,10 @@ func (sm *StateMachine) SendLongSMS(number, text string, report bool) error {
 		}
 	}
 	smsInfo.Entries[0].ID = C.SMS_ConcatenatedTextLong
-	msgUnicode := make([]C.uchar, (len(text)+1)*2)
-	decodeUTF8(&msgUnicode[0], text)
-	smsInfo.Entries[0].Buffer = &msgUnicode[0]
+	msgUnicode := (*C.uchar)(C.calloc(C.size_t(len(text)+1), 2))
+	defer C.free(unsafe.Pointer(msgUnicode))
+	decodeUTF8(msgUnicode, text)
+	smsInfo.Entries[0].Buffer = msgUnicode
 	// Prepare multipart message
 	var msms C.GSM_MultiSMSMessage
 	if e := C.GSM_EncodeMultiPartSMS(nil, &smsInfo, &msms); e != C.ERR_NONE {
